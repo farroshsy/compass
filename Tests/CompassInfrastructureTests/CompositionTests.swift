@@ -99,6 +99,82 @@ struct CompositionTests {
         }
     }
 
+    /// The seed guard asks the **fold** whether a habit has ever existed, not
+    /// whether the file has anything in it, and nothing asserted the difference:
+    /// swapping it for `events.isEmpty` left all 206 tests green.
+    ///
+    /// The two are not the same question. A log can hold events and no habit —
+    /// `subjectNamed` is one such event today, and week 1b's snapshot and
+    /// achievement kinds are more — and on that log the app must still open with
+    /// rows on it. Keyed on the raw file, first launch would produce a screen
+    /// with no habits and no way to get any except the settings sheet, which is
+    /// exactly the first-launch flow `docs/product.md` bans.
+    @Test("A log with events but no habit still seeds")
+    func seedingAsksTheFoldAndNotTheFile() throws {
+        try withTemporaryStore { layout in
+            // Something written, by this writer, that is not a habit.
+            let identity = try WriterIdentity(layout: layout).load()
+            let journal = try EventJournal(
+                layout: layout, writer: identity, clock: frozenClock(), highWaterMark: 0
+            )
+            try journal.record(
+                kind: .subjectNamed,
+                day: day("2026-07-31"),
+                source: nil,
+                payload: .subject(named: "Farros Hilmi Syafei")
+            )
+
+            let composed = AppComposition.compose(
+                storeURL: layout.storeURL, clock: frozenClock()
+            )
+
+            #expect(
+                project(composed.events).activeHabits.map(\.name)
+                    == AppComposition.seededHabits.map(\.name)
+            )
+            #expect(composed.events.count == AppComposition.seededHabits.count + 1)
+        }
+    }
+
+    /// The other half of the same guard, and the claim its comment makes:
+    /// **archived habits still count as existing.**
+    ///
+    /// Removing a habit archives it and never deletes it, so a user who removes
+    /// all four has deliberately emptied their screen. A guard that counted only
+    /// *active* habits would read that as a first launch and put all four back on
+    /// the next cold start — silently undoing four decisions, and appending four
+    /// more `habitCreated` events to a log that cannot be tidied. Mutating the
+    /// guard to `activeHabits` was the second thing this suite could not see.
+    @Test("Removing every habit does not resurrect the seed on the next launch")
+    func archivedHabitsStillCountAsExisting() throws {
+        try withTemporaryStore { layout in
+            let first = AppComposition.compose(
+                storeURL: layout.storeURL, clock: frozenClock()
+            )
+            for habit in AppComposition.seededHabits {
+                try first.recorder.record(
+                    kind: .habitArchived,
+                    day: day("2026-07-31"),
+                    source: nil,
+                    payload: .habit(habit.id)
+                )
+            }
+
+            let second = AppComposition.compose(
+                storeURL: layout.storeURL, clock: frozenClock()
+            )
+            let projected = project(second.events)
+
+            // An empty screen, and it stays empty.
+            #expect(projected.activeHabits.isEmpty)
+            // Nothing was deleted, and nothing was re-created: the same four
+            // habits, each holding every day it recorded, all of them removed.
+            #expect(projected.habits.count == AppComposition.seededHabits.count)
+            #expect(second.events.count == AppComposition.seededHabits.count * 2)
+            #expect(projected.archivedHabits.count == AppComposition.seededHabits.count)
+        }
+    }
+
     @Test("A store that cannot be opened launches degraded rather than crashing")
     func unopenableStoreLaunchesDegraded() async throws {
         // A plain file sitting where the container directory has to be:

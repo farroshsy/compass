@@ -1,21 +1,35 @@
 import CompassDomain
-import CompassUI
 import Foundation
 import Testing
 
+// `@testable` for ``SettingsEdits``, which is internal to `CompassUI` on
+// purpose: it has exactly one use site, ``SettingsView``, and widening the
+// module's public surface for a test would be the wrong trade. The two bugs it
+// was extracted to expose are driven below.
+@testable import CompassUI
+
 /// What the settings sheet does to the log.
 ///
-/// The sheet itself is SwiftUI and is not tested here — `.claude/skills/testing.md`
-/// refuses snapshot tests and a broad XCUITest suite out loud. What is testable,
-/// and is the entire risk, is the three things it can write: a habit created, a
-/// habit removed, and a name declared. Two of those have a rule that must not
-/// bend, and both rules are asserted rather than trusted:
+/// The sheet's *layout* is SwiftUI and is not tested here —
+/// `.claude/skills/testing.md` refuses snapshot tests and a broad XCUITest suite
+/// out loud. Its *behaviour* is ``SettingsEdits``, which is ordinary code and is
+/// driven directly: what each control does, and what Done commits.
+///
+/// That split is new, and it is new because behaviour living in `@State` inside
+/// a `View` is behaviour no test can reach. Two data bugs sat there — Done
+/// silently discarding the declared name, and Done writing a rename the user had
+/// cancelled by removing the habit — and both were invisible to a suite of 206
+/// tests. ``SettingsEdits`` records the reasoning.
+///
+/// Three rules must not bend, and each is asserted rather than trusted:
 ///
 /// - **removal never deletes.** It appends `habitArchived`, the habit stays in
 ///   the projection, and every day it recorded stays with it.
 /// - **the cap is four active habits.** Archived ones do not hold a slot.
+/// - **nothing is written that the user did not confirm, and nothing they did
+///   confirm is dropped.**
 @MainActor
-@Suite("The settings sheet — add, remove, and the declared name")
+@Suite("The settings sheet — add, remove, rename, and the declared name")
 struct SettingsTests {
 
     private func model(
@@ -213,6 +227,181 @@ struct SettingsTests {
 
         #expect(!model.rename(try #require(model.habits.first), to: "Walk"))
         #expect(model.habits.map(\.name) == ["Move", "Read"])
+    }
+
+    /// ``TodayModel/rename(_:to:)`` reads the current name out of the projection
+    /// rather than out of the ``HabitState`` it is handed, and the comment on
+    /// that line says the snapshot is exactly what must not be trusted — "a view
+    /// can hand back a row it rendered before the last write landed". Nothing
+    /// asserted it: trusting the caller left the whole suite green.
+    ///
+    /// The sheet hands back stale rows **by construction.** `ForEach` over
+    /// `model.habits` captures each `HabitState` by value into that row's
+    /// closures, so the row's own `onSubmit` and the Done sweep can both fire
+    /// against a value rendered before the other one wrote.
+    ///
+    /// What it costs is not cosmetic. The log is append-only and has no tidying
+    /// pass, so a redundant `habitRenamed` is on disk forever, inside
+    /// `witness.logHeads` for every achievement sealed afterwards.
+    @Test("A rename is judged against the log, not against the row that asked for it")
+    func renamingTrustsTheProjectionAndNotTheCaller() throws {
+        let seeded = seededFour()
+        let recorder = FakeRecorder(continuing: seeded)
+        let model = model(events: seeded, recorder: recorder)
+
+        // The row as the sheet rendered it, while the log still said "Read".
+        let asRendered = try #require(model.habits.first { $0.name == "Read" })
+        #expect(model.rename(asRendered, to: "Read a book"))
+        #expect(recorder.recorded.count == 1)
+
+        // The same stale row, submitted again with the name the log now has.
+        // Its snapshot still reads "Read", so a caller-trusting guard sees a
+        // change and writes a second, meaningless rename.
+        #expect(!model.rename(asRendered, to: "Read a book"))
+        #expect(recorder.recorded.count == 1)
+        #expect(model.habits.map(\.name) == ["Move", "Read a book", "Build", "Reflect"])
+    }
+
+    @Test("Renaming a habit the log has never heard of writes nothing")
+    func renamingAnUnknownHabitWritesNothing() throws {
+        let seeded = Array(seededFour().prefix(2))
+        let recorder = FakeRecorder(continuing: seeded)
+        let model = model(events: seeded, recorder: recorder)
+
+        // A row folded out of a different log entirely. The projection lookup is
+        // what refuses it; trusting the caller would mint a `habitRenamed` for a
+        // habit that has no `habitCreated` anywhere on this chain.
+        let stranger = try #require(
+            project([created(HabitID(rawValue: "habit-z"), name: "Stretch", lamport: 1)])
+                .activeHabits.first
+        )
+
+        #expect(!model.rename(stranger, to: "Walk"))
+        #expect(recorder.recorded.isEmpty)
+        #expect(model.habits.map(\.name) == ["Move", "Read"])
+    }
+
+    // MARK: Done — the sheet closing, and what it takes with it
+
+    /// **The declared name was the one field Done did not commit.**
+    ///
+    /// The Done handler's own comment says it commits first because "a name
+    /// typed and not submitted is an edit the user believes they made, and
+    /// dismissing over it would discard it in silence". It swept habit renames
+    /// and returned. The declared name — the field the sheet was added for — was
+    /// dropped, so typing a name and tapping Done left no `subjectNamed` in the
+    /// log and an empty field on reopen.
+    ///
+    /// Reopening is asserted through a fresh ``SettingsEdits``, which is what
+    /// ``SettingsView/init(model:)`` builds, so "the name is there when I come
+    /// back" is a statement about the log rather than about a cache.
+    @Test("Done commits a name typed and never submitted, and it is there on reopen")
+    func doneCommitsTheDeclaredName() throws {
+        let seeded = seededFour()
+        let recorder = FakeRecorder(continuing: seeded)
+        let model = model(events: seeded, recorder: recorder)
+
+        // The sheet opens; the user types into "Name on the record" and taps
+        // Done without ever leaving the field.
+        var edits = SettingsEdits(model)
+        edits.typedName = "Farros Hilmi Syafei"
+        edits.commitAll(into: model)
+
+        let event = try #require(recorder.last)
+        #expect(event.kind == .subjectNamed)
+        #expect(event.payload.name == "Farros Hilmi Syafei")
+        #expect(model.declaredName == "Farros Hilmi Syafei")
+
+        // Reopened.
+        #expect(SettingsEdits(model).typedName == "Farros Hilmi Syafei")
+    }
+
+    @Test("Done also commits a habit name typed and never submitted")
+    func doneCommitsHabitRenames() throws {
+        let seeded = Array(seededFour().prefix(2))
+        let recorder = FakeRecorder(continuing: seeded)
+        let model = model(events: seeded, recorder: recorder)
+        var edits = SettingsEdits(model)
+
+        edits.setName("Walk", of: try #require(model.habits.first))
+        edits.commitAll(into: model)
+
+        #expect(model.habits.map(\.name) == ["Walk", "Read"])
+        #expect(recorder.recorded.map(\.kind) == [.habitRenamed])
+    }
+
+    /// Opening the sheet and closing it is not an edit. Without this, a Done
+    /// that declared unconditionally would append a `subjectNamed` carrying `""`
+    /// on every visit, onto a log that is append-only and cannot be tidied.
+    @Test("Done writes nothing when nothing was typed")
+    func doneOnAnUntouchedSheetIsSilent() {
+        let seeded = seededFour()
+        let recorder = FakeRecorder(continuing: seeded)
+        let model = model(events: seeded, recorder: recorder)
+
+        var edits = SettingsEdits(model)
+        edits.commitAll(into: model)
+
+        #expect(recorder.recorded.isEmpty)
+        #expect(model.habits.map(\.name) == ["Move", "Read", "Build", "Reflect"])
+    }
+
+    /// **The sequence reproduced on the device.** Type into a row, tap Remove,
+    /// tap Restore: the row came back rendering the abandoned text, and Done
+    /// wrote it to the log.
+    ///
+    /// The edit survived because it was cleared only by committing it, and the
+    /// Done sweep runs over active habits — so an entry for a habit archived
+    /// mid-edit had nothing to clear it and nothing to commit it, until the
+    /// habit came back. That contradicts what the field is documented to
+    /// guarantee: it can never show a name the log does not have.
+    ///
+    /// Removing a row is the user abandoning it, not confirming it.
+    @Test("Removing a habit discards the name half-typed into it, through Restore and Done")
+    func removingDiscardsTheInFlightRename() throws {
+        let seeded = seededFour()
+        let recorder = FakeRecorder(continuing: seeded)
+        let model = model(events: seeded, recorder: recorder)
+        var edits = SettingsEdits(model)
+
+        let move = try #require(model.habits.first)
+        #expect(move.name == "Move")
+
+        edits.setName("Move outside every ZZZmorning", of: move)
+        edits.remove(move, from: model)
+        #expect(model.habits.map(\.name) == ["Read", "Build", "Reflect"])
+
+        #expect(model.restoreHabit(try #require(model.removedHabits.first)))
+
+        // The restored row shows the name the log has, not the abandoned text.
+        let restored = try #require(model.habits.first { $0.id == move.id })
+        #expect(edits.name(of: restored) == "Move")
+
+        // And Done takes nothing with it.
+        edits.commitAll(into: model)
+        #expect(model.habits.map(\.name) == ["Move", "Read", "Build", "Reflect"])
+        #expect(!recorder.recorded.contains { $0.kind == .habitRenamed })
+        #expect(recorder.recorded.map(\.kind) == [.habitArchived, .habitUnarchived])
+    }
+
+    /// The other direction of the same rule. A write that fails changes nothing
+    /// on screen everywhere else in this app, so a Remove that never archived
+    /// anything must not quietly bin what the user was typing either.
+    @Test("A Remove that fails to write keeps what the user was typing")
+    func aFailedRemoveKeepsTheEdit() throws {
+        let seeded = Array(seededFour().prefix(2))
+        let model = model(
+            events: seeded, recorder: FakeRecorder(continuing: seeded, fails: true)
+        )
+        var edits = SettingsEdits(model)
+
+        let move = try #require(model.habits.first)
+        edits.setName("Walk", of: move)
+        edits.remove(move, from: model)
+
+        #expect(model.removedHabits.isEmpty)
+        #expect(model.habits.map(\.name) == ["Move", "Read"])
+        #expect(edits.name(of: move) == "Walk")
     }
 
     // MARK: Restoring — the way back from a one-tap Remove

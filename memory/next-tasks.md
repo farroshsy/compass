@@ -30,9 +30,14 @@ Both blockers are refuted by the corpus itself:
 - [ ] **Start the paid Apple Developer enrolment now**, in a separate sitting,
       because individual verification takes days. It blocks nothing until the
       app goes on the phone to stay.
-- [ ] **Name the two habits when convenient.** Until then they are `habit-a` and
-      `habit-b`, seeded in the bundle. Renaming is a cosmetic event by
-      construction; this cannot cost anything later.
+- [x] **Name the habits — done, 2026-07-31.** Four, seeded in the bundle with
+      their names already set: **Move, Read, Build, Reflect**, one per domain —
+      health, learning, deep work, reflection. `AppComposition.seededHabits` is
+      the list and `CompositionTests` pins it. This seeds at the four-habit cap,
+      which is only safe because `TodayMetricsTests` proves four rows still fit
+      at AX5. Renaming is a cosmetic event by construction and now has a control:
+      the name is editable in place in the settings sheet, so changing one costs
+      nothing and keeps the habit's whole history.
 
 ### Blocking — before the app lives on the phone permanently
 

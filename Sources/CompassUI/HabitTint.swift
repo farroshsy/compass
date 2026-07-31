@@ -2,8 +2,9 @@ import SwiftUI
 
 /// The colour of one habit row, and the only colour on the Today screen.
 ///
-/// Two habits get two colours; everything else here is greyscale. The palette
-/// has four entries because four habits is the hard cap.
+/// Each habit gets a colour and everything else here is greyscale. The palette
+/// has four entries because four habits is the hard cap, and the bundle seeds
+/// at that cap — so all four are on screen from the first launch.
 ///
 /// A checked row is a **deep field** in the habit's hue with a paper-coloured
 /// label and mark — not the saturated system colour with white on it. The
@@ -58,8 +59,16 @@ struct HabitTint: Equatable {
     /// recovered rather than invented, and the other three follow from it.
     ///
     /// Recorded as an open question in `docs/open-questions.md`: six of these
-    /// are the implementation's arithmetic, not the designer's eye, and the
-    /// third and fourth habits are unreachable in the app as built.
+    /// are the implementation's arithmetic, not the designer's eye.
+    ///
+    /// That entry used to add "and the third and fourth habits are unreachable
+    /// in the app as built", which made it a note about code nobody could see.
+    /// **It is not true and has not been since the seed became four.**
+    /// `AppComposition.seededHabits` seeds Move, Read, Build and Reflect, so
+    /// indigo and pink render on first launch before the user has done anything,
+    /// and the settings sheet mints more habits after that. Six values chosen to
+    /// satisfy a contrast measurement are now what the owner looks at every
+    /// morning, and nobody has yet looked at them as colours.
     static let palette: [HabitTint] = [
         // teal   — #1B6B7A given;  #40C8E0 x 0.34 = rgb(22, 68, 76) given
         HabitTint(field: rgb(27, 107, 122), fieldDark: rgb(22, 68, 76)),

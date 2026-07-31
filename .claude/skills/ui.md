@@ -8,10 +8,11 @@ Anything that adds a step to that is wrong regardless of what it enables.
   over Today. The v1 budget off that path is exactly three surfaces — settings
   sheet, certificate, certificate list — and it is counted in
   `docs/product.md`'s MVP scope. Adding a fourth means editing that list first.
-- **No first-launch flow of any kind.** The two habits are seeded in the bundle
-  with names already set, so first launch opens straight onto Today with the
-  rows there. No naming screen, no keyboard, no permission prompt. Renaming
-  lives in the settings sheet.
+- **No first-launch flow of any kind.** The four habits — Move, Read, Build,
+  Reflect — are seeded in the bundle with names already set, so first launch
+  opens straight onto Today with the rows there. No naming screen, no keyboard,
+  no permission prompt. Renaming lives in the settings sheet, and so does adding
+  and removing. `AppComposition.seededHabits` is the list.
 - Information at the top, out of thumb reach. Actions at the bottom, in the
   thumb arc. This inverts the normal habit-app layout on purpose.
 - Habit rows: 76pt tall, full width minus 20pt margins, 12pt apart, corner
@@ -29,7 +30,10 @@ Anything that adds a step to that is wrong regardless of what it enables.
   rows just sit there filled.
 - No "+" button on Today. Adding, renaming and deleting habits live behind the
   settings glyph, which is deliberately hard to reach.
-- Two habits get two colours. Everything else is greyscale.
+- Each habit row gets a colour, from a four-entry palette because four is the
+  cap. Everything else is greyscale. Six of the eight field values are derived
+  arithmetic rather than the designer's eye, and all four rows ship on first
+  launch — `docs/open-questions.md` and `HabitTint`.
 - Milestone certificate: fades up 12pt over 220ms. It does not pop, bounce, fly,
   or spin. Readable and dismissable by 300ms. No single animation over 300ms.
 - The certificate never waits for a network. It shows **"Sealed on this device"**

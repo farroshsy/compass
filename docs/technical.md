@@ -1002,7 +1002,9 @@ begins before anything interesting is attempted.
 
 - **Week 1a — something tappable, on the phone, the first day.** `Day`, `Event`,
   `project()`, the synchronous journal appending to a plain file, `TodayView`,
-  two habits seeded in the bundle. Install it. Use it. Nothing else.
+  four habits seeded in the bundle with their names already set — Move, Read,
+  Build, Reflect, chosen by the owner on 2026-07-31 and listed in
+  `AppComposition.seededHabits`. Install it. Use it. Nothing else.
 - **Week 1b — the encoding, once it is being used.** The hand-written canonical
   byte encoding, `content_hash`, `prev` chaining, the encoding-stability test,
   the shard-invariance and replay-parity tests, the truncation test, the App

@@ -123,7 +123,13 @@ public struct TodayView: View {
         // control. Combining them together would swallow the button and leave
         // the sheet unreachable under VoiceOver.
         .accessibilityElement(children: .combine)
-        .accessibilityLabel(model.caption)
+        // ``TodayModel/spokenCaption``, never `caption`. Replacing the merged
+        // label discards every child's text, and one of those children is the
+        // store notice — so `caption` here announced "0 days recorded" on a
+        // launch that could not open the store and never said why. Anything
+        // added inside this element from now on has to be added to that
+        // property too, or it is written on the screen and unsayable.
+        .accessibilityLabel(model.spokenCaption)
         .overlay(alignment: .topTrailing) { settingsGlyph }
         .padding(.top, TodayMetrics.headerTopInset)
     }
@@ -160,8 +166,12 @@ public struct TodayView: View {
     /// failure state `.claude/skills/ui.md` bans from the main screen, it is the
     /// screen saying that it is not recording. It cannot nag: it is present
     /// exactly while the condition is.
+    ///
+    /// The sentence lives in ``TodayCaption/storeNotice`` because it must be the
+    /// same string here and in ``TodayModel/spokenCaption``, which is what
+    /// VoiceOver actually reads.
     private var storeNotice: some View {
-        Text("Compass cannot reach its store. Taps are not being saved.")
+        Text(TodayCaption.storeNotice)
             .font(.footnote)
             .foregroundStyle(.secondary)
             .fixedSize(horizontal: false, vertical: true)

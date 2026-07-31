@@ -50,10 +50,13 @@ naming two habits. Both were wrong:
    permanently, not writing code. A free profile expires after seven days, which
    is fatal to a habit but not to a seven-day skeleton. Start the enrolment in
    parallel; it blocks nothing until week 1a is installed to stay.
-2. **Which two habits** is not a specification problem. There is no notification
+2. **Which habits** was never a specification problem. There is no notification
    any more, and `habitRenamed` is cosmetic and never affects the fold — so this
-   is by construction the cheapest thing in the project to change. Ship
-   `habit-a` and `habit-b`, seeded in the bundle, and rename them whenever.
+   is by construction the cheapest thing in the project to change. **Settled on
+   2026-07-31:** four, seeded in the bundle with their names already set — Move,
+   Read, Build, Reflect, one per domain. `AppComposition.seededHabits`. The
+   placeholders `habit-a` and `habit-b` are gone, and the settings sheet can
+   rename, add and remove, so none of it is load-bearing.
 
 ## The standing constraint on everything
 
