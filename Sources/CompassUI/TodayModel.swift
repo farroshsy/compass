@@ -75,6 +75,25 @@ public final class TodayModel {
         self.isStoreAvailable = isStoreAvailable
     }
 
+    /// The launch initialiser: everything the composition root resolved, in one
+    /// value.
+    ///
+    /// This exists so that `App/` — which `swift test` does not compile and no
+    /// test target covers — has no argument list to get wrong. Forwarding five
+    /// arguments there meant a future session could drop
+    /// ``ComposedStore/isStoreAvailable`` in silence and turn the unopenable-store
+    /// screen back into an app that looks like it forgot everything. Here, the
+    /// forwarding is compiled and tested like everything else.
+    public convenience init(_ store: ComposedStore) {
+        self.init(
+            events: store.events,
+            clock: store.clock,
+            recorder: store.recorder,
+            source: store.source,
+            isStoreAvailable: store.isStoreAvailable
+        )
+    }
+
     // MARK: Reading
 
     /// At most four. The cap is enforced where habits are created, not here:

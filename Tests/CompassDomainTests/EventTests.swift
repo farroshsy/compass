@@ -178,6 +178,112 @@ struct EventForwardCompatibilityTests {
         #expect(decoded.extra.isEmpty)
     }
 
+    @Test("An unknown top-level key survives a decode/encode round trip")
+    func unknownTopLevelKeySurvives() throws {
+        // `docs/technical.md` §3 reserves a top-level `evidence` object, outside
+        // both `payload` and the envelope, so that attaching a photo or a voice
+        // note to a check-in is additive later rather than a format change. This
+        // is that key, written by a newer build.
+        var object = try encodedObject(of: event(.checkedIn, habit: habitA, lamport: 1))
+        object["evidence"] = ["sha256": "deadbeef"]
+
+        let decoded = try decodeEvent(object)
+        #expect(decoded.unknownFields["evidence"] == .object(["sha256": .string("deadbeef")]))
+
+        let reencoded = try JSONEncoder().encode(decoded)
+        let text = try #require(String(data: reencoded, encoding: .utf8))
+        #expect(text.contains("\"evidence\""))
+        #expect(text.contains("deadbeef"))
+
+        // And it is still there after the second trip, which is what "re-emit
+        // them unchanged" has to mean for a log that is read and rewritten.
+        let twice = try JSONDecoder().decode(Event.self, from: reencoded)
+        #expect(twice == decoded)
+        #expect(twice.unknownFields == decoded.unknownFields)
+    }
+
+    @Test("Unknown top-level keys survive whatever shape they arrive in")
+    func unknownTopLevelKeysOfEveryShape() throws {
+        var object = try encodedObject(of: event(.checkedIn, habit: habitA, lamport: 1))
+        object["evidence"] = ["sha256": "deadbeef"]
+        object["witnessedBy"] = ["a", "b"]
+        object["revision"] = 3
+        object["sealed"] = true
+        object["note"] = NSNull()
+
+        let decoded = try decodeEvent(object)
+        #expect(decoded.unknownFields.count == 5)
+        #expect(decoded.unknownFields["witnessedBy"] == .array([.string("a"), .string("b")]))
+        #expect(decoded.unknownFields["revision"] == .int(3))
+        #expect(decoded.unknownFields["sealed"] == .bool(true))
+        #expect(decoded.unknownFields["note"] == .null)
+
+        let twice = try JSONDecoder().decode(
+            Event.self, from: try JSONEncoder().encode(decoded)
+        )
+        #expect(twice == decoded)
+    }
+
+    @Test("An unknown top-level key changes nothing content_hash is computed over")
+    func unknownTopLevelKeyIsNotDigested() throws {
+        var object = try encodedObject(
+            of: event(.checkedIn, habit: habitA, lamport: 1, source: .tap)
+        )
+        let without = try decodeEvent(object)
+        object["evidence"] = ["sha256": "deadbeef"]
+        let with = try decodeEvent(object)
+
+        // `content_hash = SHA-256(event canonical bytes)`, and `docs/technical.md`
+        // §3 fixes those bytes as exactly these eleven values in exactly this
+        // order — a closed, frozen form. The hand-written canonical encoder is
+        // week 1b (§11); until it lands, asserting that every input to it is
+        // identical is the same assertion, and it is the one that fails if a
+        // future session ever routes an unknown key into a named field.
+        #expect(with.v == without.v)
+        #expect(with.id == without.id)
+        #expect(with.device == without.device)
+        #expect(with.lamport == without.lamport)
+        #expect(with.kind == without.kind)
+        #expect(with.day == without.day)
+        #expect(with.recordedAt == without.recordedAt)
+        #expect(with.zoneOffset == without.zoneOffset)
+        #expect(with.source == without.source)
+        #expect(with.payload == without.payload)
+        #expect(with.prev == without.prev)
+
+        // The difference is real and is confined to the undigested bag — the
+        // same standing as `extra`: preserved on disk, never hashed.
+        #expect(with != without)
+        #expect(without.unknownFields.isEmpty)
+        #expect(with.extra.isEmpty)
+    }
+
+    @Test("A key this build knows is never an unknown field")
+    func knownKeysAreNeverUnknownFields() throws {
+        let subject = event(.checkedIn, habit: habitA, lamport: 1)
+        #expect(subject.unknownFields.isEmpty)
+
+        // Even when a caller insists. The bag must never be able to overwrite a
+        // named value on the way out.
+        let forced = Event(
+            id: subject.id,
+            device: subject.device,
+            lamport: subject.lamport,
+            kind: subject.kind,
+            day: subject.day,
+            recordedAt: subject.recordedAt,
+            zoneOffset: subject.zoneOffset,
+            payload: subject.payload,
+            unknownFields: ["lamport": .int(9_999), "evidence": .string("kept")]
+        )
+        #expect(forced.unknownFields == ["evidence": .string("kept")])
+
+        let decoded = try JSONDecoder().decode(
+            Event.self, from: try JSONEncoder().encode(forced)
+        )
+        #expect(decoded.lamport == subject.lamport)
+    }
+
     @Test("A floating-point value inside extra is refused, not rounded")
     func extraRefusesFloatingPoint() throws {
         var object = try encodedObject(of: event(.checkedIn, habit: habitA, lamport: 1))

@@ -12,6 +12,14 @@
 //                         complete line to an `O_APPEND` descriptor. §4, §6.
 //   Export.swift          the export bundle and the import that verifies it.
 //                         §8, §10a — scheduled for week 1.
+//   Composition.swift     the composition root: the ONE place the adapters above
+//                         are wired together. It is here rather than in `App/`
+//                         because `App/` is not compiled by `swift test` and has
+//                         no test target, so the two behaviours that decide
+//                         whether a launch succeeds — a store that cannot be
+//                         opened does not crash, and the journal starts already
+//                         knowing its high-water mark — were unprotected.
+//                         `App/` is now a shell with no logic in it. §2, §4, §6.
 //
 // Still to land here, in build order (`docs/technical.md` §11): the hand-written
 // canonical byte encoding, `content_hash` and `prev` chaining with the one-time

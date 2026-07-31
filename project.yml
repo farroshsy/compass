@@ -40,3 +40,27 @@ targets:
         INFOPLIST_KEY_CFBundleDisplayName: Compass
         SWIFT_VERSION: "6.0"
         TARGETED_DEVICE_FAMILY: "1,2"
+
+# Without this block xcodegen writes no `.xcscheme` at all, and a project with
+# no scheme has no buildables — so `xcodebuild -scheme Compass -destination
+# 'platform=iOS Simulator,…'` fails with "Unable to find a destination matching
+# the provided destination specifier", and `-showdestinations` reports
+# "Supported platforms for the buildables in the current scheme is empty" and
+# offers only an ineligible `Any iOS Device` placeholder. Only
+# `xcodebuild -target Compass -sdk iphonesimulator` worked, which is the one
+# route neither Xcode's Run button, nor CI, nor the iOS-simulator tooling takes.
+schemes:
+  Compass:
+    build:
+      targets:
+        Compass: all
+    run:
+      config: Debug
+    test:
+      config: Debug
+    profile:
+      config: Release
+    analyze:
+      config: Debug
+    archive:
+      config: Release

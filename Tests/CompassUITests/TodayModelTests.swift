@@ -198,6 +198,52 @@ struct TodayModelTests {
         #expect(model(events: seeded, clock: clock).isStoreAvailable)
     }
 
+    @Test("a composed store hands the model every port it resolved")
+    func composedStoreInitialisesTheModel() throws {
+        // The launch initialiser. It exists so `App/` — which `swift test` does
+        // not compile and no test target covers — has no argument list to get
+        // wrong; forwarding five arguments there is how a fix can be deleted in
+        // silence. So the forwarding is asserted here, argument by argument.
+        let clock = ScriptedClock("2026-07-31T09:00:00+07:00")
+        let recorder = FakeRecorder()
+        let model = TodayModel(
+            ComposedStore(
+                events: seeded,
+                clock: clock,
+                recorder: recorder,
+                source: FakeSource(events: seeded),
+                isStoreAvailable: true
+            )
+        )
+
+        #expect(model.habits.count == 1)
+        #expect(model.today == day("2026-07-31"))
+        #expect(model.isStoreAvailable)
+
+        // The recorder is the one that was composed, not a default.
+        model.toggle(try #require(model.habits.first))
+        #expect(recorder.recorded.count == 1)
+    }
+
+    @Test("a composed store that could not be opened stays unavailable")
+    func composedStoreCarriesUnavailability() {
+        // The line a future session could drop without breaking a build: without
+        // it the degraded launch renders as an app that simply forgot
+        // everything. `docs/technical.md` §6.
+        let model = TodayModel(
+            ComposedStore(
+                events: [],
+                clock: ScriptedClock("2026-07-31T09:00:00+07:00"),
+                recorder: FakeRecorder(fails: true),
+                source: FakeSource(fails: true),
+                isStoreAvailable: false
+            )
+        )
+
+        #expect(!model.isStoreAvailable)
+        #expect(model.habits.isEmpty)
+    }
+
     // MARK: The launch path
 
     @Test("the replay wins over whatever the first frame rendered")

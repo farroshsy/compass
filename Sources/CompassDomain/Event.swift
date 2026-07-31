@@ -55,6 +55,38 @@ public struct Event: Hashable, Sendable, Codable {
     /// never here.
     public let extra: [String: JSONValue]
 
+    /// Every **top-level** key this build does not recognise, kept verbatim and
+    /// re-emitted unchanged. `.claude/skills/architecture.md`: "Preserve unknown
+    /// fields and unknown event kinds on read and re-emit them unchanged. Never
+    /// drop data you do not understand."
+    ///
+    /// ``extra`` catches only what is inside the `extra` object. A key beside it
+    /// — at the top level of the line — used to go nowhere at all: it decoded
+    /// into no property and re-encoding did not contain it, so an older build
+    /// reading and rewriting a newer build's log silently destroyed it.
+    ///
+    /// That matters for one specific reason. `docs/technical.md` §3 reserves a
+    /// top-level `evidence` object, **outside both `payload` and the envelope**,
+    /// precisely so that attaching a photo or a voice note to a check-in can be
+    /// added additively later without disturbing any digested field or its
+    /// ordering. A build that drops unknown top-level keys turns that additive
+    /// change into a format change the moment two builds coexist.
+    ///
+    /// **It does not enter the canonical bytes, and it never can.** §3 fixes
+    /// those bytes as a closed list of eleven named values in a frozen order,
+    /// and this is the same rule as ``extra``: preserved on disk, never
+    /// digested. An old build cannot hash a field it has never seen, so anything
+    /// that has to be provable goes in a named field.
+    ///
+    /// A value here is a ``JSONValue``, which has no floating-point case — so a
+    /// top-level key carrying a fraction makes the line undecodable rather than
+    /// being silently rounded, exactly as it already does inside ``extra``.
+    /// Losing precision inside a bag whose whole purpose is lossless
+    /// round-tripping would be worse than refusing the line, and
+    /// ``JournalReader`` already keeps a line it cannot decode out of the
+    /// projection without dropping it from the file or refusing to launch.
+    public let unknownFields: [String: JSONValue]
+
     public init(
         v: Int = Event.currentVersion,
         id: UUID,
@@ -67,7 +99,8 @@ public struct Event: Hashable, Sendable, Codable {
         source: CheckInSource? = nil,
         payload: EventPayload = .empty,
         prev: Data = Event.genesisPrev,
-        extra: [String: JSONValue] = [:]
+        extra: [String: JSONValue] = [:],
+        unknownFields: [String: JSONValue] = [:]
     ) {
         self.v = v
         self.id = id
@@ -81,6 +114,11 @@ public struct Event: Hashable, Sendable, Codable {
         self.payload = payload
         self.prev = prev
         self.extra = extra
+        // A key that this build *does* know is never an unknown field, whatever
+        // a caller passes. Normalising here rather than on encode is what makes
+        // "the unknown bag can never overwrite a named value" an invariant of
+        // every `Event` rather than a property of one code path.
+        self.unknownFields = unknownFields.filter { !Event.envelopeKeys.contains($0.key) }
     }
 
     /// The total order. **Never wall-clock.**
@@ -88,8 +126,22 @@ public struct Event: Hashable, Sendable, Codable {
 
     // MARK: Codable
 
-    private enum CodingKeys: String, CodingKey {
+    private enum CodingKeys: String, CodingKey, CaseIterable {
         case v, id, device, lamport, kind, day, recordedAt, zoneOffset, source, payload, prev, extra
+    }
+
+    /// The top-level keys this build knows. Everything else on a line is an
+    /// unknown field and is preserved as one.
+    private static let envelopeKeys = Set(CodingKeys.allCases.map(\.rawValue))
+
+    /// One arbitrary top-level key, so a line can be read and written with keys
+    /// that are not in ``CodingKeys``.
+    private struct AnyKey: CodingKey {
+        let stringValue: String
+        var intValue: Int? { nil }
+        init(stringValue: String) { self.stringValue = stringValue }
+        init?(intValue: Int) { nil }
+        init(_ key: CodingKeys) { self.stringValue = key.rawValue }
     }
 
     public init(from decoder: any Decoder) throws {
@@ -116,23 +168,47 @@ public struct Event: Hashable, Sendable, Codable {
         self.prev = prev
 
         extra = try container.decodeIfPresent([String: JSONValue].self, forKey: .extra) ?? [:]
+
+        // Everything else on the line. Read through a second, key-agnostic view
+        // of the same container, because `CodingKeys` can only ever see the
+        // keys it already knows about — which is precisely how a top-level key
+        // used to reach no property at all and vanish on re-encode.
+        let anyKeys = try decoder.container(keyedBy: AnyKey.self)
+        var unknown: [String: JSONValue] = [:]
+        for key in anyKeys.allKeys where !Event.envelopeKeys.contains(key.stringValue) {
+            unknown[key.stringValue] = try anyKeys.decode(JSONValue.self, forKey: key)
+        }
+        unknownFields = unknown
     }
 
     public func encode(to encoder: any Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(v, forKey: .v)
-        try container.encode(id, forKey: .id)
-        try container.encode(device, forKey: .device)
-        try container.encode(lamport, forKey: .lamport)
-        try container.encode(kind, forKey: .kind)
-        try container.encode(day, forKey: .day)
-        try container.encode(recordedAt, forKey: .recordedAt)
-        try container.encode(zoneOffset, forKey: .zoneOffset)
-        try container.encodeIfPresent(source, forKey: .source)
-        try container.encode(payload, forKey: .payload)
-        try container.encode(prev, forKey: .prev)
+        // One key-agnostic container for the whole envelope, rather than a typed
+        // one plus a second container for the unknown keys: two keyed containers
+        // writing into one object is a Foundation implementation detail, and the
+        // line this produces is on the survival path for every event ever
+        // recorded.
+        var container = encoder.container(keyedBy: AnyKey.self)
+        try container.encode(v, forKey: AnyKey(.v))
+        try container.encode(id, forKey: AnyKey(.id))
+        try container.encode(device, forKey: AnyKey(.device))
+        try container.encode(lamport, forKey: AnyKey(.lamport))
+        try container.encode(kind, forKey: AnyKey(.kind))
+        try container.encode(day, forKey: AnyKey(.day))
+        try container.encode(recordedAt, forKey: AnyKey(.recordedAt))
+        try container.encode(zoneOffset, forKey: AnyKey(.zoneOffset))
+        try container.encodeIfPresent(source, forKey: AnyKey(.source))
+        try container.encode(payload, forKey: AnyKey(.payload))
+        try container.encode(prev, forKey: AnyKey(.prev))
         if !extra.isEmpty {
-            try container.encode(extra, forKey: .extra)
+            try container.encode(extra, forKey: AnyKey(.extra))
+        }
+
+        // Re-emitted unchanged, in a fixed order so two encodings of one event
+        // are the same bytes. `init` has already guaranteed none of these can
+        // collide with a named key above.
+        for key in unknownFields.keys.sorted() {
+            guard let value = unknownFields[key] else { continue }
+            try container.encode(value, forKey: AnyKey(stringValue: key))
         }
     }
 }
