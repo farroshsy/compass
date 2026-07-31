@@ -203,13 +203,20 @@ final class ReplayGate {
 }
 
 /// A `habitCreated` for the seeded rows, so a model has something to tap.
-func created(_ habit: HabitID, name: String, lamport: Int) -> Event {
+///
+/// `on` is the day the habit started being tracked, and it is not decoration: the
+/// spine judges each day against the habits that had a row on it, so a fixture
+/// that creates every habit on the same arbitrary day cannot express the case the
+/// spine exists to get right.
+func created(
+    _ habit: HabitID, name: String, lamport: Int, on day: Day = day("2026-07-01")
+) -> Event {
     Event(
         id: UUID(),
         device: writerApp,
         lamport: lamport,
         kind: .habitCreated,
-        day: day("2026-07-01"),
+        day: day,
         recordedAt: 1_784_000_000_000,
         zoneOffset: surabayaOffsetSeconds / 60,
         payload: .habit(habit, name: name)
@@ -227,4 +234,19 @@ func seededFour() -> [Event] {
     return names.enumerated().map { index, name in
         created(HabitID(rawValue: "habit-\(index)"), name: name, lamport: index + 1)
     }
+}
+
+/// A `checkedIn`, for building a history a spine can be read off.
+func checkedIn(_ habit: HabitID, on iso: String, lamport: Int) -> Event {
+    Event(
+        id: UUID(),
+        device: writerApp,
+        lamport: lamport,
+        kind: .checkedIn,
+        day: day(iso),
+        recordedAt: 1_784_000_000_000,
+        zoneOffset: surabayaOffsetSeconds / 60,
+        source: .tap,
+        payload: .habit(habit)
+    )
 }

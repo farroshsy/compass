@@ -84,16 +84,36 @@ func uuid(lamport: Int, device: DeviceID) -> UUID {
 /// A deterministic, order-independent serialisation of a projection, so
 /// "byte-identical serialised state" means something. Swift's `Dictionary`
 /// iteration order is not stable, so sorting here is the point, not decoration.
+///
+/// **Every register the fold keeps belongs in here.** The determinism suite —
+/// replay parity, shuffle invariance, shard invariance, incremental equals full
+/// replay — is only as strong as what this function looks at, so a register left
+/// out of it is a register those tests do not check. `tracked` is the archival
+/// timeline the spine reads; it was the register that made a past day a function
+/// of today's settings when it did not exist.
 func serialise(_ projection: Projection) -> String {
     var lines: [String] = []
     for id in projection.habits.keys.sorted() {
         guard let habit = projection.habits[id] else { continue }
         let days = habit.checkedDays.map(\.iso).sorted().joined(separator: ",")
+        let tracked = trackedDays(of: habit)
         lines.append(
-            "\(id.rawValue)|name=\(habit.name)|archived=\(habit.isArchived)|days=[\(days)]"
+            """
+            \(id.rawValue)|name=\(habit.name)|archived=\(habit.isArchived)\
+            |from=\(habit.createdOn?.iso ?? "-")|tracked=[\(tracked)]|days=[\(days)]
+            """
         )
     }
     return lines.joined(separator: "\n")
+}
+
+/// The habit's archival transitions, oldest first: `2026-07-05:archived`.
+private func trackedDays(of habit: HabitState) -> String {
+    habit.archivalDays.keys.sorted().map { day in
+        let archived = habit.archivalDays[day]?.isArchived == true
+        return "\(day.iso):\(archived ? "archived" : "active")"
+    }
+    .joined(separator: ",")
 }
 
 /// A seeded permutation, so a shuffle test is reproducible rather than flaky.

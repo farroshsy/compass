@@ -122,10 +122,10 @@ public final class TodayModel {
     /// say or imply that it was.
     public var declaredName: String { subject.value }
 
-    /// The largest number on the screen. Never the streak — a number that
-    /// resets to zero teaches starting over, which is the behaviour this
-    /// project exists to defend against.
-    public var totalDays: Int { projection.totalCheckedDays }
+    /// The largest number on the screen: distinct days on which something was
+    /// recorded. Never the streak — a number that resets to zero teaches starting
+    /// over, which is the behaviour this project exists to defend against.
+    public var totalDays: Int { projection.daysRecorded }
 
     /// The earliest recorded day, or `nil` before anything is recorded.
     public var firstRecordedDay: Day? { projection.firstCheckedDay }
@@ -145,22 +145,33 @@ public final class TodayModel {
 
     /// The 28-dot spine, oldest first, ending on ``today``.
     ///
-    /// A dot is filled when **every** active habit was done that day. A missed
-    /// day is a plain gap: no red, no warning, no "streak at risk".
+    /// A dot is filled when **every habit that was being tracked on that day**
+    /// was done that day. A missed day is a plain gap: no red, no warning, no
+    /// "streak at risk".
     ///
     /// Which of "all habits" or "any habit" fills a dot is not stated anywhere
     /// in the corpus. All-habits is chosen because completion is an all-habits
     /// idea everywhere else in the documents — "finishing all habits does not
     /// change the layout" — and because the honest reading of a gap is "that
     /// day is not done".
+    ///
+    /// **Each day is judged against the habits active on it, never against
+    /// today's set.** `docs/product.md` calls this "a 28-day dot strip showing
+    /// gaps honestly", and a strip folded over ``Projection/activeHabits`` was
+    /// not that: a habit created this morning has no check-ins on the previous
+    /// 27 days, so adding one turned every earlier dot off, and archiving one
+    /// filled dots the user never earned. The past is not a function of the
+    /// current settings. See ``CompassDomain/HabitState/isActive(on:)`` for the
+    /// interval the log supplies.
+    ///
+    /// A day nothing was tracked on is a gap, not a completion: `allSatisfy` over
+    /// an empty set is `true`, and the days before the first habit existed are
+    /// exactly that set.
     public var spine: [Bool] {
-        let habits = projection.activeHabits
-        guard !habits.isEmpty else {
-            return Array(repeating: false, count: TodayModel.spineLength)
-        }
-        return (0..<TodayModel.spineLength).map { offset in
+        (0..<TodayModel.spineLength).map { offset in
             let day = today.adding(offset - (TodayModel.spineLength - 1))
-            return habits.allSatisfy { $0.isChecked(on: day) }
+            let tracked = projection.habitsActive(on: day)
+            return !tracked.isEmpty && tracked.allSatisfy { $0.isChecked(on: day) }
         }
     }
 
@@ -269,6 +280,60 @@ public final class TodayModel {
 
         let id = HabitID(rawValue: "h-\(UUID().uuidString.lowercased())")
         guard let event = append(kind: .habitCreated, payload: .habit(id, name: name)) else {
+            return false
+        }
+        projection.apply(event)
+        return true
+    }
+
+    /// Renames a habit. Returns `false` and writes nothing when the name is
+    /// blank, unchanged, or the write fails.
+    ///
+    /// **It keeps the habit.** `habitRenamed` is cosmetic — `docs/technical.md`
+    /// §3 marks it "never affects the fold" — so the identifier, every day it has
+    /// recorded and its position among the rows all survive, and no digest
+    /// changes. That is the entire reason this exists: `docs/product.md` justifies
+    /// banning a first-launch naming flow with "renaming lives in the settings
+    /// sheet, where it already belongs", and until it did, changing a name at the
+    /// four-habit cap meant Remove followed by Add — which mints a **new**
+    /// ``CompassDomain/HabitID``, leaves the old history behind an archived row,
+    /// and starts the new one at zero. A cosmetic change was costing the user
+    /// their record.
+    @discardableResult
+    public func rename(_ habit: HabitState, to rawName: String) -> Bool {
+        let name = rawName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { return false }
+        // The projection, not the passed-in snapshot: a view can hand back a row
+        // it rendered before the last write landed.
+        guard let current = projection.habit(habit.id), current.name != name else { return false }
+
+        guard let event = append(kind: .habitRenamed, payload: .habit(habit.id, name: name)) else {
+            return false
+        }
+        projection.apply(event)
+        return true
+    }
+
+    /// Puts a removed habit back on Today by appending a `habitUnarchived`.
+    /// Returns `false` and writes nothing when the habit is not removed, when
+    /// four are already active, or when the write fails.
+    ///
+    /// Remove is one tap and there is no confirmation dialog — `.claude/skills/ui.md`
+    /// forbids one — so without this a mis-tap was unrecoverable from the
+    /// interface: the row was gone, and the only way back was to add a habit,
+    /// which mints a new identifier and orphans the history behind the old row.
+    /// The event kind and the fold have supported this since the first commit;
+    /// only the way in was missing.
+    ///
+    /// The cap is checked here for the same reason it is checked in ``addHabit``:
+    /// four rows is what the layout holds, and restoring a fifth would put a
+    /// habit on screen whose row cannot be reached.
+    @discardableResult
+    public func restoreHabit(_ habit: HabitState) -> Bool {
+        guard projection.habit(habit.id)?.isArchived == true else { return false }
+        guard projection.mayCreateHabit else { return false }
+
+        guard let event = append(kind: .habitUnarchived, payload: .habit(habit.id)) else {
             return false
         }
         projection.apply(event)

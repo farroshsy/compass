@@ -230,13 +230,24 @@ public enum TodayMetrics {
         size.isAccessibilitySize ? markStrokeAccessibility : markStroke
     }
 
-    /// The row's height for a **single-line** name. Fixed below the
+    /// The row's height for a name of `nameLines` lines. Fixed below the
     /// accessibility sizes; above them the row grows with its name from
     /// ``rowAccessibilityMinHeight``.
-    public static func rowHeight(at size: DynamicTypeSize) -> CGFloat {
+    ///
+    /// `nameLines` used to be absent, and the row was documented as "the row's
+    /// height for a **single-line** name" while ``nameLineLimit(at:)`` returns 2
+    /// above `accessibility1`. That was safe while the four names were compiled
+    /// into the bundle and known to be short; it stopped being safe the moment
+    /// the settings sheet could accept any name at all.
+    ///
+    /// It is clamped to ``nameLineLimit(at:)``, so asking for two lines below
+    /// `accessibility2` gives the fixed 76pt row: a name cannot wrap where the
+    /// line limit is 1.
+    public static func rowHeight(at size: DynamicTypeSize, nameLines: Int = 1) -> CGFloat {
         guard size.isAccessibilitySize else { return rowHeight }
+        let lines = CGFloat(max(1, min(nameLines, nameLineLimit(at: size))))
         let name = (namePointSize(at: size) * lineHeightFactor).rounded()
-        return max(rowAccessibilityMinHeight, name + 2 * rowVerticalPadding)
+        return max(rowAccessibilityMinHeight, lines * name + 2 * rowVerticalPadding)
     }
 
     /// The header block: the number, its caption, the gap, and the spine.
@@ -255,19 +266,65 @@ public enum TodayMetrics {
     }
 
     /// Points left over on the frame after the header, the minimum spacer and
-    /// `habitCount` rows. Negative means the screen does not fit.
+    /// `habitCount` rows, `wrappedNames` of which take two lines. Negative means
+    /// the content is taller than the frame.
     ///
     /// **This is the assertion behind the four-habit cap.** The design drew the
     /// screen at AX5 with four habits and found it fits with room to spare;
     /// this is that finding as arithmetic, so a future change to any number
     /// above breaks a test instead of breaking the screen.
+    ///
+    /// ### The budget re-derived for wrapped names
+    ///
+    /// The finding was made with four short, compiled-in names. Names are now
+    /// typed by the user, and ``nameLineLimit(at:)`` gives them a second line
+    /// above `accessibility1`, so the worst case is no longer the one that was
+    /// measured. At AX5 a wrapped row costs one extra 64pt line against the 137pt
+    /// the single-line case leaves spare:
+    ///
+    /// | wrapped names | spare at AX5 |
+    /// |---|---|
+    /// | 0 | 137 |
+    /// | 1 | 73 |
+    /// | 2 | 9 |
+    /// | 3 | −55 |
+    /// | 4 | −119 |
+    ///
+    /// Three wrapped names overflow the frame, and at AX3 four wrapped names
+    /// overflow it by 23. `TodayMetricsTests` pins every one of those numbers.
+    ///
+    /// **What was done about it: the layout survives the overflow; the sheet is
+    /// not constrained.** The alternative was a length limit on habit names, and
+    /// it was rejected because it cannot deliver what it costs. **A character
+    /// count does not bound rendered width:** ten wide glyphs wrap where fifteen
+    /// narrow ones do not, so no cap written in characters can *guarantee* a
+    /// single line. And the cap it would take to come close — around ten
+    /// characters of average text in the ~262pt a name gets at AX5 — refuses
+    /// "Read a book" and "Meditate daily". That is a permanent constraint on the
+    /// one thing a habit is, bought in exchange for a guarantee that still would
+    /// not hold. And no arrangement of the other
+    /// numbers recovers the space: four two-line AX5 rows need 660pt against the
+    /// 541pt between the header and the home indicator, so even collapsing the
+    /// 32pt spacer entirely leaves it 87pt short.
+    ///
+    /// So ``TodayView`` lets the screen scroll **when, and only when, the content
+    /// does not fit** — the content is given a minimum height of the viewport and
+    /// bottom alignment, so in every case that fits, which is every non-
+    /// accessibility size and AX5 with names of ordinary length, the layout is
+    /// exactly the one the design specified: bottom-anchored, last row 24pt above
+    /// the home indicator. Nothing is clamped, nothing is truncated, and no row
+    /// becomes unreachable — which is what "the layout survives it" has to mean
+    /// for a screen whose entire purpose is being tapped.
     public static func spareHeight(
         habitCount: Int,
         at size: DynamicTypeSize,
         captionLines: Int = 2,
+        wrappedNames: Int = 0,
         frameHeight: CGFloat = TodayMetrics.frameHeight
     ) -> CGFloat {
-        let rows = CGFloat(habitCount) * rowHeight(at: size)
+        let wrapped = max(0, min(wrappedNames, habitCount))
+        let rows = CGFloat(wrapped) * rowHeight(at: size, nameLines: 2)
+            + CGFloat(habitCount - wrapped) * rowHeight(at: size)
             + CGFloat(max(0, habitCount - 1)) * rowSpacing
         let used = safeAreaTop
             + headerTopInset

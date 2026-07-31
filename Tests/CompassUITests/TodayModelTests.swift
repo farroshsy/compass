@@ -244,6 +244,94 @@ struct TodayModelTests {
         #expect(model.habits.isEmpty)
     }
 
+    // MARK: The 28-day spine
+
+    /// `docs/product.md` calls the spine "a 28-day dot strip showing gaps
+    /// honestly". These two tests are written against that word rather than
+    /// against the arithmetic: a strip that rewrites what a past day meant
+    /// because of something the user changed today is not honest, whichever
+    /// direction it rewrites it in.
+    ///
+    /// A day that was complete when it happened is complete forever; a day that
+    /// was missed when it happened is missed forever. Both are the same rule seen
+    /// from the two sides, and the fold used to get both of them wrong.
+    private func fullFortnight(_ habit: HabitID, endingOn last: String) -> [Event] {
+        let end = day(last)
+        let start = end.adding(-(TodayModel.spineLength - 1))
+        var events = [created(habit, name: "Move", lamport: 1, on: start)]
+        for offset in 0..<TodayModel.spineLength {
+            events.append(
+                checkedIn(habit, on: start.adding(offset).iso, lamport: 10 + offset)
+            )
+        }
+        return events
+    }
+
+    @Test("Adding a habit today does not turn off the days before it existed")
+    func addingAHabitLeavesThePastAlone() {
+        let clock = ScriptedClock("2026-07-31T09:00:00+07:00")
+        let log = fullFortnight(habitA, endingOn: "2026-07-31")
+        let model = model(events: log, clock: clock, recorder: FakeRecorder(continuing: log))
+
+        // Twenty-eight days, every one of them done.
+        #expect(model.spine == Array(repeating: true, count: 28))
+
+        model.addHabit(named: "Read")
+
+        // The twenty-seven days before the new habit existed are unchanged. The
+        // user did not un-do them by opening the settings sheet.
+        #expect(model.spine.dropLast() == ArraySlice(Array(repeating: true, count: 27)))
+        // Today is no longer complete, and that is not a rewrite: there is a
+        // habit on the screen today that has not been done today.
+        #expect(model.spine.last == false)
+    }
+
+    @Test("Removing a habit does not fill a day it was missed on")
+    func removingAHabitLeavesThePastAlone() throws {
+        let clock = ScriptedClock("2026-07-31T09:00:00+07:00")
+        let start = day("2026-07-31").adding(-(TodayModel.spineLength - 1))
+        let missed = start.adding(16)
+
+        var log = fullFortnight(habitA, endingOn: "2026-07-31")
+        log.append(created(habitB, name: "Read", lamport: 2, on: start))
+        for offset in 0..<TodayModel.spineLength where offset != 16 {
+            log.append(checkedIn(habitB, on: start.adding(offset).iso, lamport: 100 + offset))
+        }
+
+        let model = model(events: log, clock: clock, recorder: FakeRecorder(continuing: log))
+
+        // One gap, on the day "Read" was missed.
+        #expect(model.spine.filter { !$0 }.count == 1)
+        #expect(model.spine[16] == false)
+
+        let read = try #require(model.habits.first { $0.name == "Read" })
+        model.removeHabit(read)
+
+        // Still one gap, in the same place. Removing the habit did not hand the
+        // user a day they did not do — the dot is a record, not a setting.
+        #expect(model.spine[16] == false, "a missed day must not be filled by removing a habit")
+        #expect(model.spine.filter { !$0 }.count == 1)
+        // And the days it was done on stay done.
+        #expect(model.spine.last == true)
+    }
+
+    /// Before the first habit existed nothing was tracked, and a day with nothing
+    /// tracked is a gap rather than a completion — `allSatisfy` over an empty set
+    /// is `true`, which would fill the whole strip on the morning of install.
+    @Test("The days before the first habit are gaps, not completions")
+    func anEmptyPastIsNotAFullPast() throws {
+        let clock = ScriptedClock("2026-07-31T09:00:00+07:00")
+        let log = [created(habitA, name: "Move", lamport: 1, on: day("2026-07-31"))]
+        let model = model(events: log, clock: clock, recorder: FakeRecorder(continuing: log))
+
+        #expect(model.spine == Array(repeating: false, count: 28))
+
+        model.toggle(try #require(model.habits.first))
+
+        #expect(model.spine.last == true)
+        #expect(model.spine.dropLast().allSatisfy { $0 == false })
+    }
+
     // MARK: The launch path
 
     @Test("the replay wins over whatever the first frame rendered")

@@ -170,7 +170,7 @@ the app says I didn't" moment.
 
 ### Events — the only truth
 
-Seven kinds, closed set, but encoded as a `RawRepresentable` string wrapper
+Nine kinds, closed set, but encoded as a `RawRepresentable` string wrapper
 rather than an enum, so an unknown kind from a newer build decodes cleanly
 instead of crashing.
 
@@ -183,7 +183,18 @@ checkedIn(habitID, day: Day, source)              source: tap | widget | shortcu
 checkInRevoked(habitID, day: Day)                 compensating event, never a delete
 achievementAwarded(achievementID, …)              see §5 and the protocol document
 achievementRevoked(achievementID, reason)
+subjectNamed(name)                                optional, self-declared, unverified
 ```
+
+**`subjectNamed` was added on 2026-07-31, additively, by exactly the mechanism
+this section describes** — a new `kind` string, reusing `name`, a payload key
+this document had already frozen. It is the optional self-declared name for the
+person the record is about; `docs/open-questions.md` records the question and
+`memory/decisions.md` the choice. It is listed here rather than left implicit
+because the per-kind payload table below is the specification week 1b's
+canonical encoder is written from, and a kind missing from that table at the
+moment the format freezes is the same class of omission as the `payload` gap
+this section documents further down.
 
 **Kinds deliberately removed, and why removing them is free.** Earlier drafts
 reserved `habitCadenceChanged(habitID, cadence, effectiveFrom: Day)`,
@@ -264,6 +275,7 @@ checkedIn          {"habitID":<string>}
 checkInRevoked     {"habitID":<string>}
 achievementAwarded {"achievementID":<string>}
 achievementRevoked {"achievementID":<string>,"reason":<string>}
+subjectNamed       {"name":<string>}
 ```
 
 `day` and `source` stay at the top level rather than moving inside `payload`.

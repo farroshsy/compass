@@ -29,7 +29,7 @@ struct ProjectionFoldTests {
         #expect(projection.status(habitA, on: target) == .missed)
         // Nothing was deleted: both events are still in the log.
         #expect(events.count == 2)
-        #expect(projection.totalCheckedDays == 0)
+        #expect(projection.daysRecorded == 0)
     }
 
     @Test("Re-checking after a revoke wins, because it is the later writer")
@@ -81,7 +81,7 @@ struct ProjectionFoldTests {
         #expect(before.habit(habitA)?.name == "Meditate")
         #expect(after.habit(habitA)?.name == "Sit still")
         #expect(before.habit(habitA)?.checkedDays == after.habit(habitA)?.checkedDays)
-        #expect(before.totalCheckedDays == after.totalCheckedDays)
+        #expect(before.daysRecorded == after.daysRecorded)
     }
 
     @Test("Archiving and un-archiving are last-writer-wins too")
@@ -110,12 +110,76 @@ struct ProjectionFoldTests {
         #expect(serialise(project(corpus())) == serialise(withoutAwards))
     }
 
-    @Test("Total days is computed from the per-habit shards, not accumulated")
-    func totalDays() {
+    /// The headline number is a count of **days**, and this suite's previous
+    /// version of this test could not tell: it recomputed the implementation's own
+    /// sum by hand and asserted the two agreed, which is true of any arithmetic
+    /// whatsoever. It passed while the screen said "4 days recorded" on a user's
+    /// first morning.
+    ///
+    /// So the assertions below are all written against the sentence a person
+    /// reads — `docs/product.md`:112 and `.claude/skills/ui.md`:23, "the largest
+    /// number on the screen is total days" — and every one of them fails if the
+    /// number goes back to counting habit-days.
+    @Test("Four habits checked on one day is one day, not four")
+    func oneDayIsOneDay() {
+        let target = day("2026-07-31")
+        let habits = ["h-1", "h-2", "h-3", "h-4"].map { HabitID(rawValue: $0) }
+        var events: [Event] = []
+        for (index, habit) in habits.enumerated() {
+            events.append(event(.habitCreated, habit: habit, lamport: index + 1, name: habit.rawValue))
+            events.append(
+                event(.checkedIn, habit: habit, on: target, lamport: index + 5, source: .tap)
+            )
+        }
+
+        #expect(project(events).daysRecorded == 1)
+    }
+
+    /// "Recorded", not "completed" — stated in ``Projection/daysRecorded`` and
+    /// asserted here, because it is the decision the caption's wording forces and
+    /// it is invisible in the arithmetic.
+    @Test("A day counts once when only some of its habits were done")
+    func aPartialDayIsStillADay() {
+        let target = day("2026-07-31")
+        let events = [
+            event(.habitCreated, habit: habitA, lamport: 1, name: "Move"),
+            event(.habitCreated, habit: habitB, lamport: 2, name: "Read"),
+            event(.checkedIn, habit: habitA, on: target, lamport: 3, source: .tap),
+        ]
+
+        #expect(project(events).daysRecorded == 1)
+    }
+
+    @Test("Three calendar days across two habits is three days")
+    func daysAccumulateByCalendarDay() {
+        let events = [
+            event(.habitCreated, habit: habitA, lamport: 1, name: "Move"),
+            event(.habitCreated, habit: habitB, lamport: 2, name: "Read"),
+            event(.checkedIn, habit: habitA, on: day("2026-07-29"), lamport: 3, source: .tap),
+            event(.checkedIn, habit: habitB, on: day("2026-07-29"), lamport: 4, source: .tap),
+            event(.checkedIn, habit: habitA, on: day("2026-07-30"), lamport: 5, source: .tap),
+            event(.checkedIn, habit: habitB, on: day("2026-07-31"), lamport: 6, source: .tap),
+        ]
+
+        // Four check-ins, three days. The old sum said four.
+        #expect(project(events).daysRecorded == 3)
+    }
+
+    /// The line under the number reads "N days recorded since <date>", so the two
+    /// halves have to describe one span: **a count of days cannot exceed the
+    /// number of calendar days since the first one.** A sum across habits can and
+    /// does — the corpus records 18 habit-days inside a 12-day span — so this
+    /// fails on the sum without knowing anything about how the number is computed.
+    @Test("The number can never exceed the days elapsed since the first record")
+    func theCaptionCannotContradictItself() throws {
         let projection = project(corpus())
-        let byHand = projection.habits.values.reduce(0) { $0 + $1.checkedDays.count }
-        #expect(projection.totalCheckedDays == byHand)
-        #expect(projection.totalCheckedDays > 0)
+        let first = try #require(projection.firstCheckedDay)
+        let last = try #require(projection.habits.values.compactMap { $0.checkedDays.max() }.max())
+        let elapsed = last.ordinal - first.ordinal + 1
+
+        #expect(elapsed == 12)
+        #expect(projection.daysRecorded <= elapsed)
+        #expect(projection.daysRecorded > 0)
     }
 
     /// The additive claim, as a test. A kind added later must leave the habit
@@ -126,6 +190,172 @@ struct ProjectionFoldTests {
         let withoutDeclarations = project(corpus().filter { $0.kind != .subjectNamed })
         #expect(serialise(project(corpus())) == serialise(withoutDeclarations))
         #expect(project(corpus()) == withoutDeclarations)
+    }
+}
+
+/// Which habits a given day is judged against.
+///
+/// This is the fold behind the 28-dot spine, and `docs/product.md` calls that
+/// strip "a 28-day dot strip showing gaps honestly". The tests here are written
+/// against that word: a strip that rewrites what a past day meant when you change
+/// a setting today is not honest, whichever direction it rewrites it in.
+@Suite("Projection — a day is judged against the habits it had")
+struct ProjectionActiveOnDayTests {
+
+    private let move = HabitID(rawValue: "h-move")
+    private let read = HabitID(rawValue: "h-read")
+
+    /// Habit `move`, created on 1 July and checked in every day from then to the
+    /// 10th. Nothing else.
+    private func aTrackedFortnight() -> [Event] {
+        var events = [
+            event(.habitCreated, habit: move, on: day("2026-07-01"), lamport: 1, name: "Move")
+        ]
+        for offset in 0..<10 {
+            events.append(
+                event(
+                    .checkedIn, habit: move, on: day("2026-07-01").adding(offset),
+                    lamport: 10 + offset, source: .tap
+                )
+            )
+        }
+        return events
+    }
+
+    @Test("A day before a habit existed is not judged against that habit")
+    func aHabitDoesNotReachBackwards() {
+        let before = project(aTrackedFortnight())
+        // Every one of those ten days was complete: one habit, and it was done.
+        for offset in 0..<10 {
+            let target = day("2026-07-01").adding(offset)
+            #expect(before.habitsActive(on: target).map(\.id) == [move])
+            #expect(before.habitsActive(on: target).allSatisfy { $0.isChecked(on: target) })
+        }
+
+        // A second habit is added on the 10th, the way the settings sheet adds
+        // one: a `habitCreated` carrying today's day.
+        let after = project(
+            aTrackedFortnight()
+                + [event(.habitCreated, habit: read, on: day("2026-07-10"), lamport: 30, name: "Read")]
+        )
+
+        // The nine days before it existed are untouched. They were complete and
+        // they stay complete — nothing about them changed, because nothing about
+        // them did change.
+        for offset in 0..<9 {
+            let target = day("2026-07-01").adding(offset)
+            #expect(after.habitsActive(on: target).map(\.id) == [move], "day \(target.iso)")
+            #expect(
+                after.habitsActive(on: target).allSatisfy { $0.isChecked(on: target) },
+                "day \(target.iso) must still read as complete"
+            )
+        }
+
+        // The day it was added is judged against it, and it was not done.
+        let today = day("2026-07-10")
+        #expect(after.habitsActive(on: today).map(\.id) == [move, read])
+        #expect(!after.habitsActive(on: today).allSatisfy { $0.isChecked(on: today) })
+    }
+
+    @Test("Archiving a habit does not fill a day it missed")
+    func archivingDoesNotReachBackwards() {
+        // Both habits from the 1st. `read` was done on the 1st and missed on the
+        // 2nd, so the 2nd is a gap and always was.
+        let base = [
+            event(.habitCreated, habit: move, on: day("2026-07-01"), lamport: 1, name: "Move"),
+            event(.habitCreated, habit: read, on: day("2026-07-01"), lamport: 2, name: "Read"),
+            event(.checkedIn, habit: move, on: day("2026-07-01"), lamport: 3, source: .tap),
+            event(.checkedIn, habit: read, on: day("2026-07-01"), lamport: 4, source: .tap),
+            event(.checkedIn, habit: move, on: day("2026-07-02"), lamport: 5, source: .tap),
+        ]
+        let missed = day("2026-07-02")
+
+        #expect(!project(base).habitsActive(on: missed).allSatisfy { $0.isChecked(on: missed) })
+
+        // Removed on the 5th — three days after the day it missed.
+        let archived = project(
+            base + [event(.habitArchived, habit: read, on: day("2026-07-05"), lamport: 6)]
+        )
+
+        #expect(archived.activeHabits.map(\.id) == [move])
+        #expect(archived.habitsActive(on: missed).map(\.id) == [move, read])
+        #expect(
+            !archived.habitsActive(on: missed).allSatisfy { $0.isChecked(on: missed) },
+            "a day the user missed must not become a day they made"
+        )
+        // And the day it was done stays done.
+        #expect(archived.habitsActive(on: day("2026-07-01")).allSatisfy {
+            $0.isChecked(on: day("2026-07-01"))
+        })
+    }
+
+    /// The archive takes effect from the day it happens, so a habit created and
+    /// removed on one day was never tracked on any day. That is what makes a
+    /// mis-tapped Remove leave no mark on the record — the Remove control is one
+    /// tap and unconfirmed, so this case is not hypothetical.
+    @Test("A habit created and removed on the same day was tracked on no day")
+    func anEmptyIntervalTracksNothing() {
+        let today = day("2026-07-10")
+        let projection = project([
+            event(.habitCreated, habit: move, on: day("2026-07-01"), lamport: 1, name: "Move"),
+            event(.checkedIn, habit: move, on: today, lamport: 2, source: .tap),
+            event(.habitCreated, habit: read, on: today, lamport: 3, name: "Mis-tap"),
+            event(.habitArchived, habit: read, on: today, lamport: 4),
+        ])
+
+        #expect(projection.habitsActive(on: today).map(\.id) == [move])
+        #expect(projection.habitsActive(on: today).allSatisfy { $0.isChecked(on: today) })
+    }
+
+    @Test("Un-archiving starts tracking again from the day it happens")
+    func unarchivingReopensTheInterval() {
+        let projection = project([
+            event(.habitCreated, habit: read, on: day("2026-07-01"), lamport: 1, name: "Read"),
+            event(.habitArchived, habit: read, on: day("2026-07-05"), lamport: 2),
+            event(.habitUnarchived, habit: read, on: day("2026-07-09"), lamport: 3),
+        ])
+
+        #expect(projection.habitsActive(on: day("2026-07-04")).map(\.id) == [read])
+        #expect(projection.habitsActive(on: day("2026-07-05")).isEmpty)
+        #expect(projection.habitsActive(on: day("2026-07-08")).isEmpty)
+        #expect(projection.habitsActive(on: day("2026-07-09")).map(\.id) == [read])
+    }
+
+    /// A day before anything was ever tracked is a gap, not a completion. It is
+    /// the case an `allSatisfy` over an empty set gets wrong for free.
+    @Test("A day nothing was tracked on has nothing active")
+    func daysBeforeTheFirstHabit() {
+        let projection = project(aTrackedFortnight())
+        #expect(projection.habitsActive(on: day("2026-06-30")).isEmpty)
+        #expect(projection.habitsActive(on: day("2026-06-01")).isEmpty)
+    }
+
+    /// The archival timeline is per-day state, so it has to survive the merge the
+    /// same way the check-in cells do. A shard that saw only the unarchive must
+    /// not be able to erase the day the other shard recorded the archive on.
+    @Test("The tracked interval survives a shard merge in either direction")
+    func theIntervalIsShardInvariant() {
+        let events = [
+            event(.habitCreated, habit: read, on: day("2026-07-01"), lamport: 1, name: "Read"),
+            event(.habitArchived, habit: read, on: day("2026-07-05"), lamport: 2),
+            event(.habitUnarchived, habit: read, on: day("2026-07-09"), lamport: 3),
+            event(.habitCreated, habit: move, on: day("2026-07-02"), lamport: 4, name: "Move"),
+        ]
+        let whole = project(events)
+
+        let firstHalf = project(Array(events.prefix(2)))
+        let secondHalf = project(Array(events.suffix(2)))
+
+        for merged in [firstHalf.merging(secondHalf), secondHalf.merging(firstHalf)] {
+            #expect(merged == whole)
+            for iso in ["2026-07-01", "2026-07-04", "2026-07-05", "2026-07-09"] {
+                #expect(
+                    merged.habitsActive(on: day(iso)).map(\.id)
+                        == whole.habitsActive(on: day(iso)).map(\.id),
+                    "day \(iso)"
+                )
+            }
+        }
     }
 }
 
@@ -277,8 +507,8 @@ struct ProjectionCapTests {
         let before = project(events)
         let after = project(events + [event(.habitArchived, habit: habitA, lamport: 4)])
 
-        #expect(before.totalCheckedDays == 2)
-        #expect(after.totalCheckedDays == 2)
+        #expect(before.daysRecorded == 2)
+        #expect(after.daysRecorded == 2)
         #expect(after.habit(habitA)?.checkedDays == before.habit(habitA)?.checkedDays)
         #expect(after.activeHabits.isEmpty)
     }

@@ -37,15 +37,29 @@ public struct TodayView: View {
     }
 
     public var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            header
-            Spacer(minLength: TodayMetrics.minimumSpacer)
-            rows
+        // **A scroll view that does not scroll.** The content is given a minimum
+        // height of the viewport and bottom alignment, so whenever it fits — every
+        // non-accessibility size, and AX5 with names of ordinary length — the
+        // layout is exactly the specified one: information at the top, rows in the
+        // thumb arc, last row 24pt above the home indicator, nothing scrollable
+        // and no bounce.
+        //
+        // It is here for the case that does not fit. Habit names are typed by the
+        // user now, and Dynamic Type rule 3 gives a name a second line above
+        // `accessibility1`; three wrapped names at AX5 need more than the frame
+        // has. ``TodayMetrics/spareHeight(habitCount:at:captionLines:wrappedNames:frameHeight:)``
+        // has the re-derived budget and the reasoning for solving it here rather
+        // than by limiting what the settings sheet accepts. Without this, the
+        // overflow pushes the header off the top of the screen and the number
+        // silently disappears; with it, everything stays reachable.
+        GeometryReader { proxy in
+            ScrollView {
+                content.frame(minHeight: proxy.size.height, alignment: .bottom)
+            }
+            // Inert while the content fits: no rubber-banding on a screen that
+            // has nothing to scroll.
+            .scrollBounceBehavior(.basedOnSize)
         }
-        .padding(.horizontal, TodayMetrics.horizontalMargin)
-        // The last row sits 24pt above the home indicator.
-        .padding(.bottom, TodayMetrics.bottomInset)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
         .task {
             model.refreshDay()
             await model.reconcile()
@@ -58,6 +72,19 @@ public struct TodayView: View {
         .sheet(isPresented: $isShowingSettings) {
             SettingsView(model: model)
         }
+    }
+
+    /// The screen itself, unchanged: header, spacer, rows.
+    private var content: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            header
+            Spacer(minLength: TodayMetrics.minimumSpacer)
+            rows
+        }
+        .padding(.horizontal, TodayMetrics.horizontalMargin)
+        // The last row sits 24pt above the home indicator.
+        .padding(.bottom, TodayMetrics.bottomInset)
+        .frame(maxWidth: .infinity, alignment: .bottom)
     }
 
     // MARK: Information, at the top
