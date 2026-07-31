@@ -166,12 +166,56 @@ No further edits unless implementation uncovers a real problem. Refining
 governance documents is not progress, and it is a particularly seductive way to
 feel productive without building anything.
 
+**The roadmap is explicitly not frozen.**
+
+> The destination is fixed. The route may change when implementation teaches us
+> something new.
+
+Discovering that the verification SDK must be built before the wallet is not
+architectural drift — it is sequencing improving on contact with reality, and it
+needs no ADR. Changing *what* is being built does need one. The test is whether
+the set of deliverables changed, not whether their order did.
+
 From here, every working session answers exactly one question:
 
 > **What is the next smallest complete subsystem that moves Compass toward the
 > reference implementation?**
 
-## 12. Known unresolved conflict
+## 12. Evidence before architectural change
+
+Architecture may be changed only if at least one of these is true, and the
+proposed change must **cite which one**:
+
+- implementation has become materially more complex than expected;
+- performance measurements show the current design is insufficient;
+- a security issue has been identified;
+- a dependency has become unsupported or deprecated;
+- a newer mature technology provides a measurable improvement in correctness,
+  maintainability, interoperability or developer experience.
+
+**Architecture is never changed because it feels cleaner.** "I found a cleaner
+architecture" is not evidence; it is an aesthetic preference, and it is the
+sentence that precedes most of the rewrites this project is designed to avoid.
+"Measurement shows X" or "dependency Y is deprecated" is evidence.
+
+This rule applies to itself: amending this constitution requires the same
+citation.
+
+## 13. Milestone success
+
+Distinct from §7, which governs a single task. A **milestone** succeeds only if:
+
+- previously working functionality still works;
+- existing data survives unchanged;
+- no architectural debt was knowingly introduced;
+- the application remains usable;
+- the next milestone can begin without rewriting previous work.
+
+A task can be "done" while the milestone it belongs to has failed — the code
+compiles and its tests pass, and the app is nonetheless worse than it was. §7 is
+not sufficient on its own, and the last two criteria are the ones that catch it.
+
+## 14. Known unresolved conflict
 
 **Wallet recovery versus the invisibility rule.** ADR 0003 §2.5 finds that the
 recovery-key ceremony required by the embedded-wallet path is a seed phrase by
