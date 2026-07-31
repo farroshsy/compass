@@ -64,11 +64,20 @@ struct HabitTint: Equatable {
     /// That entry used to add "and the third and fourth habits are unreachable
     /// in the app as built", which made it a note about code nobody could see.
     /// **It is not true and has not been since the seed became four.**
-    /// `AppComposition.seededHabits` seeds Move, Read, Build and Reflect, so
-    /// indigo and pink render on first launch before the user has done anything,
-    /// and the settings sheet mints more habits after that. Six values chosen to
-    /// satisfy a contrast measurement are now what the owner looks at every
-    /// morning, and nobody has yet looked at them as colours.
+    /// `AppComposition.seededHabits` seeds Move, Read, Build and Reflect, so all
+    /// four rows are on screen from the first launch and the settings sheet mints
+    /// more habits after that.
+    ///
+    /// **A correction of that correction, because it over-swung.** These are
+    /// *checked*-row fields and nothing else — the type carries `field` and
+    /// `fieldDark` and no unchecked value, and ``HabitRow`` fills an unchecked
+    /// row with `Color.primary.opacity(0.06)`, grey, with no hue in it. So a
+    /// fresh install shows four grey rows, not four colours: **indigo and pink
+    /// appear the first time the third and fourth habits are checked.** That is
+    /// still one tap away on day one, which is why the open question's trigger
+    /// has fired and stays fired — six values chosen to satisfy a contrast
+    /// measurement are what the owner looks at every morning as soon as the
+    /// habits are done, and nobody has yet looked at them as colours.
     static let palette: [HabitTint] = [
         // teal   — #1B6B7A given;  #40C8E0 x 0.34 = rgb(22, 68, 76) given
         HabitTint(field: rgb(27, 107, 122), fieldDark: rgb(22, 68, 76)),

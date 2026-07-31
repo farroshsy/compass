@@ -64,9 +64,12 @@ public struct SettingsView: View {
                 ToolbarItem(placement: .confirmationAction) {
                     // Committing first: a name typed and not submitted is an edit
                     // the user believes they made, and dismissing over it would
-                    // discard it in silence. **Every** field, including the
-                    // declared name — see ``SettingsEdits/commitAll(into:)``,
-                    // which is where that sentence became true.
+                    // discard it in silence. **Every edit — the habit names and
+                    // the declared name — and no creation.** The "New habit"
+                    // field is left uncommitted on purpose, because minting a
+                    // permanent `habitCreated` from a half-typed string nobody
+                    // confirmed is the one loss here that cannot be undone.
+                    // ``SettingsEdits/commitAll(into:)`` argues it in full.
                     Button("Done") {
                         edits.commitAll(into: model)
                         dismiss()

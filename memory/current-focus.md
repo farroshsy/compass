@@ -55,8 +55,11 @@ naming two habits. Both were wrong:
    is by construction the cheapest thing in the project to change. **Settled on
    2026-07-31:** four, seeded in the bundle with their names already set — Move,
    Read, Build, Reflect, one per domain. `AppComposition.seededHabits`. The
-   placeholders `habit-a` and `habit-b` are gone, and the settings sheet can
-   rename, add and remove, so none of it is load-bearing.
+   placeholder *display names* `habit-a` and `habit-b` are gone; the opaque
+   *identifiers* `habit-a` through `habit-d` stay, deliberately, because a
+   `HabitID` is what `facts` carries into a digest — `memory/decisions.md`
+   2026-07-31. The settings sheet can rename, add and remove, so no name here
+   is load-bearing.
 
 ## The standing constraint on everything
 

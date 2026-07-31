@@ -133,18 +133,36 @@ struct SettingsEdits {
 
     // MARK: Done
 
-    /// What the Done button commits.
+    /// What the Done button commits: **every edit, and no creation.**
     ///
-    /// Committing first, and committing **everything**: a name typed and not
-    /// submitted is an edit the user believes they made, and dismissing over it
-    /// discards it in silence. That was already the stated reason this handler
-    /// exists, and the declared name — the one field the sheet was added for —
-    /// was the one it did not cover.
+    /// Committing the edits: a name typed and not submitted is a change the user
+    /// believes they made, and dismissing over it discards it in silence. That
+    /// was already the stated reason this handler exists, and the declared name —
+    /// the one field the sheet was added for — was the one it did not cover. So
+    /// habit renames and the declared name are both swept below.
+    ///
+    /// **``newHabitName`` is deliberately not swept, and this is the reason.**
+    /// Every other field on this sheet *edits* something that already exists and
+    /// is revisable: a rename is cosmetic and another rename undoes it, and a
+    /// declared name is withdrawn by declaring an empty one. Creating a habit is
+    /// neither. It mints a `HabitID` and appends a `habitCreated` to a log that
+    /// is append-only and has no tidying pass, so a habit minted from three
+    /// abandoned characters is on disk forever, inside `witness.logHeads` for
+    /// every achievement sealed afterwards — and Remove does not take it back,
+    /// because Remove archives. It could also spend the last free slot under the
+    /// four-habit cap without the user asking.
+    ///
+    /// It is the same rule ``remove(_:from:)`` already keeps in the other
+    /// direction: **abandoning a field is not confirming it.** Dismissal is
+    /// ambiguous, and where it is ambiguous this sheet does the reversible thing.
+    /// Adding is one visible, enabled tap away on the same row, and the text is
+    /// still there until the sheet closes.
     mutating func commitAll(into model: TodayModel) {
         // Active habits only, which is now exactly right: an edit for a habit
         // removed mid-session was dropped by ``remove(_:from:)`` when the row
         // went away, so there is nothing left here that has no row.
         for habit in model.habits { commitName(of: habit, into: model) }
         commitDeclaredName(into: model)
+        // No `add(into:)`. See above — it is refused, not forgotten.
     }
 }

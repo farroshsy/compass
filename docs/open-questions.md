@@ -297,7 +297,7 @@ line on the certificate, lands with `CertificateView` in week 3.
 Both entries recorded here as unreachable in the app as built are now reachable,
 and each said so through its own falsifier. The settings glyph shipped with the
 sheet — entry 1 is closed. Four habits are seeded and the sheet mints more, so
-every colour in the palette renders on first launch — entry 2's trigger has
+every colour in the palette is one tap away on day one — entry 2's trigger has
 fired, and it has stopped being a dormant note about code nobody can see and
 become a live design question about the screen the owner opens every morning.
 
@@ -316,22 +316,26 @@ geometry moved out of `TodayView`'s documentation and into `TodayMetrics`, where
 rather than remembered. The original entry is kept below because it is the reason
 the position was not re-invented.
 
-
-The design adds one — SF Symbols `gearshape`, 17pt, 30% ink, a 44 x 44 target
-centred at (371, 128) in the 402 x 874 frame, overhanging the margin by 11pt so
-the glyph's trailing edge lands on the margin line and the target still reaches
-44. It records this as a decision taken on the user's behalf: an addition to a
-screen whose rule is that nothing may be added, "justified only because the
-sheet is already budgeted and otherwise unreachable".
-
-**Not built, because the sheet is not built.** The settings sheet is week 3.
-`.claude/skills/ui.md` budgets three surfaces off the launch path and all three
-are week 3 or later, so a glyph shipped now is a control that opens nothing.
-The geometry above is recorded in `TodayView`'s documentation so that week 3
-places it where it was measured rather than where it looks right.
-
-**Falsifier:** the settings sheet exists. Then the glyph ships with it, at that
-position, unchanged.
+> **Historical — the entry as written on 2026-07-31, before the sheet existed.
+> Every present tense below is about that day, not about this build.** It is
+> quoted rather than deleted because the geometry in it is the measurement the
+> shipped glyph was placed from.
+>
+> The design adds one — SF Symbols `gearshape`, 17pt, 30% ink, a 44 x 44 target
+> centred at (371, 128) in the 402 x 874 frame, overhanging the margin by 11pt so
+> the glyph's trailing edge lands on the margin line and the target still reaches
+> 44. It records this as a decision taken on the user's behalf: an addition to a
+> screen whose rule is that nothing may be added, "justified only because the
+> sheet is already budgeted and otherwise unreachable".
+>
+> **Not built, because the sheet is not built.** The settings sheet is week 3.
+> `.claude/skills/ui.md` budgets three surfaces off the launch path and all three
+> are week 3 or later, so a glyph shipped now is a control that opens nothing.
+> The geometry above is recorded in `TodayView`'s documentation so that week 3
+> places it where it was measured rather than where it looks right.
+>
+> **Falsifier:** the settings sheet exists. Then the glyph ships with it, at that
+> position, unchanged. — **Fired. See the CLOSED note above.**
 
 ### 2. Six of the eight habit-row field colours are derived, not designed
 
@@ -355,11 +359,22 @@ the contrast measurement — rather than a factor it never states.
 third or fourth habit, so those two rows cannot appear". Both halves of that are
 now false, and the note said to look at the colours the first time they could
 appear. That time is now.** `AppComposition.seededHabits` seeds **four** habits —
-Move, Read, Build, Reflect — so indigo and pink are on the screen on first
-launch, before the user has done anything at all, and the settings sheet mints
-more after that. Nothing about the derivation changed; what changed is that six
-values computed to satisfy a contrast measurement are now what the owner looks
-at every morning, and **nobody has ever looked at them as colours.** They are
+Move, Read, Build, Reflect — and the settings sheet mints more after that, so
+the third and fourth rows are on the screen from the first launch.
+
+**When the two derived colours actually appear, exactly.** A correction written
+here on 2026-07-31 said "indigo and pink render on first launch before the user
+has done anything". That over-swung and was false. Every value in the palette is
+a **checked** row's field: `HabitTint` carries `field` and `fieldDark` and no
+unchecked value, and `HabitRow` fills an unchecked row with
+`Color.primary.opacity(0.06)` — grey, no hue. A fresh install is four grey rows.
+**Indigo and pink appear the first time the third and fourth habits are
+checked**, which is one tap away on day one.
+
+That is still the trigger, and the trigger stays fired. Nothing about the
+derivation changed; what changed is that six values computed to satisfy a
+contrast measurement are what the owner looks at every morning as soon as the
+habits are done, and **nobody has ever looked at them as colours.** They are
 arithmetic that passes a test, not a palette anyone chose. The open question is
 no longer "are these plausible" but "are these right", and only an eye can
 answer it.
