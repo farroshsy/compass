@@ -9,10 +9,10 @@ repository, this wins, and the other file is wrong and should be fixed.
 
 ## 1. What this project is
 
-Compass is a **flagship engineering project**: a habit tracker its author uses
-every day, built as the reference implementation of an Achievement Protocol,
-deliberately over-engineered in its infrastructure in order to learn modern
-architecture end to end.
+Compass is a **personal daily-use application and the reference implementation
+of the Achievement Protocol.** Its purpose is to demonstrate modern software
+engineering through a complete vertical slice: product, protocol, cryptography,
+blockchain, verification, and client applications.
 
 It is **not** a startup. It is not seeking users, revenue, funding, growth or
 product-market fit. Objections of the form *"you do not need this to ship"* are
@@ -32,10 +32,10 @@ out of scope and must not be raised again.
 
 Settled on 2026-07-31 and not to be reopened.
 
-The blockchain subsystem — contracts, wallet, verification, issuer path — is a
-**first-class deliverable**, equal in standing to the iOS client. It is not
-optional, not a stretch goal, and not something that must justify itself in
-product terms.
+**The blockchain subsystem, the protocol, and the iOS application are all
+mandatory deliverables. Their implementation order is determined by engineering
+dependencies, not by their relative importance.** None is optional, a stretch
+goal, or required to justify itself in product terms.
 
 Its justification is recorded honestly and is sufficient: **it is a deliberate
 learning objective.** The documentation must say exactly that, and must never
@@ -65,9 +65,12 @@ thing that keeps the project alive.
 - **Existing data survives every change.** Always.
 - **Finish one subsystem before starting another.** Implementation, tests,
   documentation, review, then move on.
-- **Technology is replaced only when it is newer *and* stable *and* simpler *and*
-  documented *and* solves a problem that has actually arisen.** Never because it
-  is trendy. Never because something newer exists.
+- **Prefer mature, well-supported technology over novelty.** New technologies may
+  be adopted only if they materially improve correctness, security,
+  maintainability, interoperability or developer experience. **Newness alone is
+  never sufficient justification.** This clause is deliberately written to permit
+  adopting something released in 2027 that is genuinely better, and to forbid
+  adopting something released next week that merely exists.
 
 ### Why these rules exist
 
@@ -113,7 +116,62 @@ premature optimisation.
 
 The codebase should teach its reader *why* each decision exists.
 
-## 9. Known unresolved conflict
+## 9. Engineering mode
+
+**The research phase is complete.** Do not continue exploring alternative
+architectures unless implementation reveals a concrete deficiency. Assume the
+architecture recorded in the ADRs is correct. The task is to execute it
+faithfully.
+
+When a genuine problem is found:
+
+1. Explain it.
+2. Propose the alternatives.
+3. Recommend one.
+4. **If it changes architecture, stop and wait for approval.**
+
+Do not silently redesign the system. The failure mode this prevents is real and
+has already happened in this project's history: an assistant that "discovers" a
+better architecture every few sessions and gradually replaces the one that took
+weeks to design. Ideas are cheap here and always available; a system that
+survives contact with six months of implementation is not.
+
+## 10. Architecture review
+
+**After completing every milestone, perform an architecture review before
+beginning the next one.** Evaluate:
+
+- unnecessary complexity
+- duplicated abstractions
+- dead code
+- performance
+- protocol consistency
+- security
+- test coverage and test value
+- documentation drift
+- dependency updates
+- ADR consistency with the code as built
+
+**Resolve what is found before starting the next milestone.** Debt deferred to
+"later" in a project like this is debt deferred to phase ten, where it arrives
+all at once and looks like a reason to start over.
+
+## 11. Governance is frozen
+
+The governance layer — this constitution, the ADR structure, the product vision,
+the technical vision, the authority split, the definition of done — is **frozen
+as of 2026-07-31.**
+
+No further edits unless implementation uncovers a real problem. Refining
+governance documents is not progress, and it is a particularly seductive way to
+feel productive without building anything.
+
+From here, every working session answers exactly one question:
+
+> **What is the next smallest complete subsystem that moves Compass toward the
+> reference implementation?**
+
+## 12. Known unresolved conflict
 
 **Wallet recovery versus the invisibility rule.** ADR 0003 §2.5 finds that the
 recovery-key ceremony required by the embedded-wallet path is a seed phrase by
