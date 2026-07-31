@@ -1,0 +1,15 @@
+# macOS
+.DS_Store
+
+# Swift Package Manager
+.build/
+.swiftpm/
+Package.resolved
+
+# Xcode — the project is generated from project.yml by xcodegen, so the
+# generated bundles are build artifacts, not source. project.yml IS checked in.
+*.xcodeproj
+*.xcworkspace
+DerivedData/
+xcuserdata/
+*.xcuserstate
