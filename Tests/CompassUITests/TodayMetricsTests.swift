@@ -1,0 +1,171 @@
+import CompassDomain
+import CompassUI
+import Foundation
+import SwiftUI
+import Testing
+
+/// The Today screen's layout budget, as arithmetic.
+///
+/// `docs/technical.md` §9 and `.claude/skills/testing.md` both refuse SwiftUI
+/// snapshot tests out loud — they break on every point release and catch
+/// nothing a daily user would not notice within a day. This is the thing they
+/// are refused *instead of*: not a rendering of the screen, but the numbers the
+/// screen is built from, asserted against the design's load-bearing findings.
+///
+/// The one that matters is the four-habit cap. `docs/product.md` makes four a
+/// hard cap; the design drew the screen at AX5 with four habits and found it
+/// still fits, and called that "worth knowing, because it was the least certain
+/// of the product's hard numbers". A number changed six months from now could
+/// quietly falsify it, and nothing on screen would say so until someone with
+/// four habits turned Dynamic Type up.
+@Suite("TodayMetrics — the layout budget")
+struct TodayMetricsTests {
+
+    // MARK: The finding this suite exists for
+
+    @Test("Four habits fit at AX5 — the hard cap survives the worst case")
+    func fourHabitsFitAtAX5() {
+        let spare = TodayMetrics.spareHeight(habitCount: 4, at: .accessibility5)
+        #expect(spare > 0)
+    }
+
+    /// The exact number, so that changing *any* constant on the screen forces
+    /// this finding to be re-derived rather than silently re-scoped.
+    ///
+    /// It is not the design's 165. The design's own AX5 metric table gives
+    /// `title3 20 -> 49`, one row off Apple's published table, which gives 53 —
+    /// see ``TodayMetrics``. Correcting that makes every row 3.6pt taller, and
+    /// the caption is counted at the two lines that "128 days recorded since 5
+    /// December 2025" actually takes at 30pt in 362 points. The finding
+    /// survives the correction with 137pt to spare, which is the point: the
+    /// conclusion was right even though one of its inputs was not.
+    ///
+    /// 874 − (62 safe + 28 inset + 153 header + 32 spacer + 404 rows + 24
+    /// inset + 34 indicator) = 137.
+    @Test("The AX5 spare height is pinned")
+    func spareHeightIsPinned() {
+        let spare = TodayMetrics.spareHeight(habitCount: 4, at: .accessibility5)
+        #expect(abs(spare - 137) < 0.05)
+    }
+
+    @Test("Four habits fit at every size")
+    func fourHabitsFitEverywhere() {
+        for size in DynamicTypeSize.allCases {
+            #expect(TodayMetrics.spareHeight(habitCount: 4, at: size) > 0)
+        }
+    }
+
+    @Test("A fifth habit is what the cap is protecting against")
+    func theCapIsLoadBearing() {
+        // Five fits; six does not. The cap is four, so the screen is never
+        // asked either question — but if the cap is ever raised, this is the
+        // assertion that says how far it can go.
+        #expect(TodayMetrics.spareHeight(habitCount: 5, at: .accessibility5) > 0)
+        #expect(TodayMetrics.spareHeight(habitCount: 6, at: .accessibility5) < 0)
+    }
+
+    // MARK: Dynamic Type rule 1 — clamp the display, never the controls
+
+    @Test("The header clamps at accessibility2 and the rows do not clamp at all")
+    func theHeaderClampsAndTheRowsDoNot() {
+        // The caption stops growing.
+        #expect(
+            TodayMetrics.captionPointSize(at: .accessibility5)
+                == TodayMetrics.captionPointSize(at: .accessibility2)
+        )
+        // The name does not.
+        #expect(
+            TodayMetrics.namePointSize(at: .accessibility5)
+                > TodayMetrics.namePointSize(at: .accessibility2)
+        )
+    }
+
+    /// Rule 2, and the reason it exists: unclamped, the caption reaches 49pt
+    /// against a 44pt number and "stands almost as tall as the number,
+    /// destroying the one hierarchy on the screen".
+    ///
+    /// This is the assertion that fails if the clamp is ever removed.
+    @Test("The number stays the largest thing in the header at every size")
+    func theHierarchySurvivesAX5() {
+        for size in DynamicTypeSize.allCases {
+            #expect(TodayMetrics.captionPointSize(at: size) < TodayMetrics.numberPointSize)
+        }
+        // Specifically: 30 against 44, not 49 against 44.
+        #expect(TodayMetrics.captionPointSize(at: .accessibility5) == 30)
+    }
+
+    // MARK: Dynamic Type rule 3 — two lines above accessibility1
+
+    @Test("Habit names get a second line above accessibility1")
+    func namesGetTwoLinesAtAccessibilitySizes() {
+        #expect(TodayMetrics.nameLineLimit(at: .large) == 1)
+        #expect(TodayMetrics.nameLineLimit(at: .accessibility1) == 1)
+        #expect(TodayMetrics.nameLineLimit(at: .accessibility2) == 2)
+        #expect(TodayMetrics.nameLineLimit(at: .accessibility5) == 2)
+    }
+
+    // MARK: Dynamic Type rule 4 — the spine does not scale, and it must fit
+
+    @Test("28 dots fit the content width")
+    func theSpineFits() {
+        // 28 * 9 + 27 * 2 = 306 of the 362 available points.
+        #expect(TodayMetrics.spineWidth() == 306)
+        #expect(TodayMetrics.spineWidth() <= TodayMetrics.contentWidth)
+        #expect(TodayMetrics.contentWidth == 362)
+    }
+
+    // MARK: The row
+
+    @Test("The row is fixed below the accessibility sizes and grows above them")
+    func rowHeightIsFixedThenGrows() {
+        for size in DynamicTypeSize.allCases where !size.isAccessibilitySize {
+            #expect(TodayMetrics.rowHeight(at: size) == 76)
+        }
+        #expect(TodayMetrics.rowHeight(at: .accessibility1) >= 88)
+        #expect(
+            TodayMetrics.rowHeight(at: .accessibility5)
+                > TodayMetrics.rowHeight(at: .accessibility1)
+        )
+    }
+}
+
+/// The sentence under the number.
+@Suite("TodayCaption")
+struct TodayCaptionTests {
+
+    private let british = Locale(identifier: "en_GB")
+
+    @Test("It reads as the design's sentence")
+    func theDesignsSentence() {
+        let caption = TodayCaption.text(
+            totalDays: 128, firstDay: day("2025-12-05"), locale: british
+        )
+        #expect(caption == "128 days recorded since 5 December 2025")
+    }
+
+    @Test("One day is singular")
+    func singular() {
+        let caption = TodayCaption.text(
+            totalDays: 1, firstDay: day("2025-12-05"), locale: british
+        )
+        #expect(caption == "1 day recorded since 5 December 2025")
+    }
+
+    /// Nothing recorded means there is no date to be *since*, and the screen
+    /// must not invent a start.
+    @Test("An empty log has no since clause")
+    func emptyLog() {
+        #expect(TodayCaption.text(totalDays: 0, firstDay: nil, locale: british) == "0 days recorded")
+    }
+
+    /// A `Day` has no timezone. Rendering it must not be able to move the label
+    /// across a boundary, whatever the machine running this thinks the time is.
+    @Test("The date does not shift under a timezone")
+    func theLabelDoesNotMove() {
+        let first = day("2026-01-01")
+        #expect(
+            TodayCaption.text(totalDays: 1, firstDay: first, locale: british)
+                == "1 day recorded since 1 January 2026"
+        )
+    }
+}

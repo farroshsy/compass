@@ -20,8 +20,9 @@ import UIKit
 @Observable
 public final class TodayModel {
 
-    /// How many days the spine shows. A display, never a control.
-    public static let spineLength = 28
+    /// How many days the spine shows. A display, never a control. The number
+    /// itself lives in ``TodayMetrics`` beside the geometry that has to fit it.
+    public static let spineLength = TodayMetrics.spineLength
 
     /// The fold of the log. Every read on this screen goes through it.
     public private(set) var projection: Projection
@@ -105,6 +106,18 @@ public final class TodayModel {
     /// resets to zero teaches starting over, which is the behaviour this
     /// project exists to defend against.
     public var totalDays: Int { projection.totalCheckedDays }
+
+    /// The earliest recorded day, or `nil` before anything is recorded.
+    public var firstRecordedDay: Day? { projection.firstCheckedDay }
+
+    /// The line under the number: "128 days recorded since 5 December 2025".
+    ///
+    /// It replaced the bare word "days", and the design records why: the number
+    /// alone carries no signal — 128 to 129 is imperceptible — and it was
+    /// nonetheless the largest thing on the screen. See ``TodayCaption``.
+    public var caption: String {
+        TodayCaption.text(totalDays: totalDays, firstDay: firstRecordedDay)
+    }
 
     public func isChecked(_ habit: HabitState) -> Bool {
         habit.isChecked(on: today)

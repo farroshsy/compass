@@ -125,6 +125,23 @@ public struct Projection: Hashable, Sendable {
         habits.values.reduce(0) { $0 + $1.checkedDays.count }
     }
 
+    /// The earliest day any habit was checked in on, or `nil` when nothing has
+    /// been recorded yet.
+    ///
+    /// The screen says "128 days recorded since 5 December 2025", and this is
+    /// the second half of that sentence — a fact that cannot reset, cannot be
+    /// gamed, and implies no target, which is why the design put it under the
+    /// number in place of the bare word "days".
+    ///
+    /// Computed from the per-habit shards on read, exactly like
+    /// ``totalCheckedDays``, and never accumulated in the fold. A minimum kept
+    /// as a global accumulator would be order-dependent under revocation, which
+    /// is the class of bug the shard-invariance test in `docs/technical.md`
+    /// §9.3 exists to forbid.
+    public var firstCheckedDay: Day? {
+        habits.values.compactMap { $0.checkedDays.min() }.min()
+    }
+
     // MARK: Folding
 
     /// Applies one event. Called synchronously on the tap path, before the
