@@ -121,6 +121,49 @@ struct CompositionTests {
         }
     }
 
+    @Test("Composing without naming a writer lands on the app's own chain")
+    func defaultWriterIsTheApp() throws {
+        // `compose()` takes no arguments at the one call site that matters —
+        // `App/CompassApp.swift` — so the writer it picks is a default, and a
+        // default nothing asserts is a default that can be changed in silence.
+        //
+        // Two things go wrong if it drifts, and neither is visible at the
+        // keyboard. The app stops finding the identity it already persisted, so
+        // an installed copy mints a fresh `DeviceID` on upgrade and starts a
+        // second chain beside its own history — `PROJECT_CONSTITUTION.md` §5,
+        // "existing data survives every change". And in week 2 the widget
+        // arrives as a second writer, at which point the app's name has to be
+        // distinct from the widget's for `docs/technical.md` §4 to hold at all.
+        //
+        // The store URL and the clock are passed because a genuinely
+        // no-argument call writes into the real Documents directory. **The
+        // writer is not passed. That is the whole point of this test.**
+        try withTemporaryStore { layout in
+            let composed = AppComposition.compose(
+                storeURL: layout.storeURL, clock: frozenClock()
+            )
+            let event = try composed.recorder.record(
+                kind: .checkedIn, day: day("2026-07-31"), source: .tap, payload: .habit(habitA)
+            )
+
+            // The literal `"app"`, never `WriterIdentity.app`. A test written
+            // against the constant follows the constant wherever it is moved and
+            // therefore asserts nothing — which is exactly the hole this closes:
+            // renaming that constant to any value that collides with nothing
+            // left all 123 tests green while every installed copy's
+            // `writer-app.id` was orphaned.
+            let identityFile = layout.writerIdentity("app")
+            let stored = (try? String(contentsOf: identityFile, encoding: .utf8))?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            #expect(stored != nil, "no writer-app.id: this launch wrote as some other writer")
+            #expect(event.device == stored.map(DeviceID.init(rawValue:)))
+
+            // And the seed went onto that same chain, so first launch and first
+            // tap are one writer rather than two.
+            #expect(composed.events.allSatisfy { $0.device == event.device })
+        }
+    }
+
     @Test("Each writer composes onto its own sequence")
     func writersAreSeparate() throws {
         // "Device means writer, not phone." `docs/technical.md` §4. The widget

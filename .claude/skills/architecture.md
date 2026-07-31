@@ -22,8 +22,13 @@ overturning a decision.
   Infrastructure exists. This is the only load-bearing boundary; if
   Application-vs-Domain starts costing edits in four targets for one field,
   collapse Application into Domain.
-- Infrastructure is constructed in exactly one file, the composition root in
-  `App/`. Nowhere else.
+- Infrastructure is constructed in exactly one file, the composition root
+  `Sources/CompassInfrastructure/Composition.swift`. Nowhere else. It lives
+  inside the package, not in `App/`, because `App/` is not compiled by
+  `swift test` — mutation showed two real fixes there were covered by no test at
+  all. `App/` is a thin shell that calls the root and holds no branch, no
+  `catch` and no forwarded argument. `docs/technical.md` §2,
+  `memory/decisions.md` 2026-07-31.
 - New capability goes behind an existing port if one fits. New ports are added
   in `CompassDomain/Ports.swift` and nowhere else.
 - Never mutate or delete an event. Un-checking appends `checkInRevoked`.

@@ -342,3 +342,51 @@ contradiction, and then in the same change.
 
 **First milestone, in full:** install the app, create two habits, tap, close,
 open it tomorrow, and it still knows.
+
+---
+
+## 2026-07-31 — the composition root moved into the package
+
+**What moved.** The composition root was `CompassApp.compose()` in
+`App/CompassApp.swift`. It is now `AppComposition.compose()` in
+`Sources/CompassInfrastructure/Composition.swift`. `App/` is a thin shell that
+constructs the composed value and hands it to the SwiftUI scene, and holds no
+branch, no `catch` and no forwarded argument. **The "exactly one place"
+rule is unchanged** — infrastructure is still constructed in exactly one file.
+Only its location changed. `docs/technical.md` §2 and
+`.claude/skills/architecture.md` are updated to match, in this change.
+
+**The evidence, under `PROJECT_CONSTITUTION.md` §12.** The limb cited is
+**maintainability** — "a newer mature technology provides a measurable
+improvement in correctness, maintainability, interoperability or developer
+experience", read here as the maintainability improvement, not a technology
+adoption. The **"a security issue has been identified" limb does not apply** and
+is not claimed; nothing here is a security finding.
+
+The evidence is a measurement, not a preference. `App/` is not compiled by
+`swift test` and has no test target, so mutation testing was run against the
+wiring as it stood: restoring the `preconditionFailure` on the store-open
+failure path (a crash on every launch), and separately deleting the argument
+that hands the journal its already-known high-water mark (a full log decode on
+the tap path), each left **111 of 111 tests passing**. Two fixes for two real
+bugs had no test at their fix site, and either could have been deleted by a
+future session in silence. After the move both are ordinary unit tests in
+`Tests/CompassInfrastructureTests/CompositionTests.swift`, verified by
+re-running the same two mutations on a copy: the crash now aborts the run, and
+the missing prime fails at `CompositionTests.swift:120`.
+
+It is in `CompassInfrastructure` rather than `CompassApplication` for a
+mechanical reason: `CompassUI` imports `CompassApplication`, so composing
+something the UI consumes cannot live there without the import running
+backwards.
+
+**What was given up.** The composition root is no longer visible in `App/`,
+which is the first place a reader opening this repository would look for it —
+"where does the app start, and what does it build?" is answered one directory
+further in than convention suggests. That cost is accepted, and it is paid down
+only by the pointers: `App/CompassApp.swift` says where the wiring went and why,
+`docs/technical.md` §2 shows it in the module tree, and this entry is the record.
+The alternative was keeping the root where a reader expects it and leaving the
+lines that can be wrong where no test can see them.
+
+Accepted by the human on 2026-07-31.

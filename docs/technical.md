@@ -94,15 +94,34 @@ compass/
     CompassDomain/          imports: Foundation only
     CompassApplication/     imports: CompassDomain
     CompassInfrastructure/  imports: CompassDomain
+      Composition.swift     the composition root — the only place infrastructure
+                            is constructed
     CompassUI/              imports: CompassApplication, CompassDomain
   Tests/
     CompassDomainTests/     ~80% of all tests. Pure. Milliseconds.
     CompassApplicationTests/
     CompassInfrastructureTests/
-  App/                      composition root — the only place infrastructure is constructed
+  App/                      thin shell: calls the composition root, nothing else
   Widget/
   project.yml
 ```
+
+**Infrastructure is still constructed in exactly one place. That place is now
+inside the package.** The rule did not change; only its location did. The
+composition root was `App/CompassApp.compose()` until 2026-07-31, and `App/` is
+not compiled by `swift test` and has no test target — so every line of wiring
+sat where no test could reach it. Mutation proved the cost rather than asserting
+it: restoring a `preconditionFailure` on the store-open failure path, and
+separately deleting the argument that hands the journal its already-known
+high-water mark, each left the whole suite green. Both lines were fixes for real
+bugs, and either could have been deleted in silence.
+
+So the wiring moved to `CompassInfrastructure/Composition.swift`, which the test
+suite compiles, and `App/` became a shell holding no branch, no `catch` and no
+forwarded argument — because an argument in `App/` is an argument no test can
+see. It is not in `CompassApplication` for a mechanical reason: `CompassUI`
+imports `CompassApplication`, so composing the app there would require the
+import to run backwards. `memory/decisions.md`, 2026-07-31.
 
 Only one boundary is load-bearing: **Domain must not know Infrastructure
 exists.** Application-versus-Domain is a nicety. If adding one field starts
@@ -602,7 +621,8 @@ a project whose documented failure mode is that day one is where projects die.
 
 The container is a directory URL. `architecture.md` already requires that
 infrastructure be constructed in exactly one file, the composition root in
-`App/`. The honest statement of the requirement is therefore:
+`CompassInfrastructure/Composition.swift`. The honest statement of the
+requirement is therefore:
 
 > **Every path must obtain its base URL from a single injected `storeURL`.** No
 > file path is constructed anywhere else. Switching that URL from

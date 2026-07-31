@@ -203,9 +203,23 @@ public struct Event: Hashable, Sendable, Codable {
             try container.encode(extra, forKey: AnyKey(.extra))
         }
 
-        // Re-emitted unchanged, in a fixed order so two encodings of one event
-        // are the same bytes. `init` has already guaranteed none of these can
-        // collide with a named key above.
+        // Re-emitted unchanged, so nothing a newer build wrote is lost by an
+        // older one reading and rewriting the line. `init` has already
+        // guaranteed none of these can collide with a named key above.
+        //
+        // The sort makes the *sequence of encode calls* deterministic. It does
+        // **not** make the emitted bytes stable, and an earlier version of this
+        // comment claimed it did: `JSONEncoder` does not promise to preserve
+        // keyed-container order, and three lines pulled off the live simulator
+        // log each carried a different top-level key order. Two encodings of one
+        // event are therefore equal as JSON, not as bytes.
+        //
+        // That is permitted rather than tolerated. `docs/technical.md` §3: "The
+        // on-disk JSON line is not required to be byte-identical to the
+        // canonical form — it carries `extra` and may order keys differently."
+        // Byte-stability is the job of the hand-written canonical encoder that
+        // lands in week 1b, which orders keys itself and never sees `extra`.
+        // Nothing may be derived from the byte layout of this line.
         for key in unknownFields.keys.sorted() {
             guard let value = unknownFields[key] else { continue }
             try container.encode(value, forKey: AnyKey(stringValue: key))
