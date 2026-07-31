@@ -306,3 +306,15 @@ specific embedded-wallet recovery ceremony, which breaks the invisibility
 non-goal. Build the chain, not that design. Recorded here so the next reader
 does not re-derive the alarm. The live decision remains §14 / ADR 0003 §2.5:
 invisible recovery, or overturn the non-goal in writing.
+
+## 2026-07-31 — evidence attachments: forward compatibility only
+
+Recorded the invariants that keep a future photo/voice attachment additive:
+evidence is optional and never required for a check-in; it lives in its own
+top-level object, not in `payload` or the envelope; media is referenced by
+content hash and never embedded, so it never enters canonical bytes, the chain,
+or an anchor.
+
+This is NOT a decision to build evidence capture. It is a constraint on how it
+would be built, written down while the canonical form is still open, because
+after the first signature it cannot be revised. See `technical.md` §3.

@@ -195,7 +195,7 @@ the set of deliverables changed, not whether their order did.
 From here, every working session answers exactly one question:
 
 > **What is the next smallest complete subsystem that moves Compass toward the
-> reference implementation?**
+> only implementation?**
 
 ## 12. Evidence before architectural change
 

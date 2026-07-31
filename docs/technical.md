@@ -248,7 +248,37 @@ achievementRevoked {"achievementID":<string>,"reason":<string>}
 
 `day` and `source` stay at the top level rather than moving inside `payload`.
 They are already digested where they are, and moving them would be a format
-change that buys nothing.
+change that buys nothing. `source` is operational metadata, not semantics.
+
+**`payload` is a closed structure, not a second `extra`.** In v1 every key
+inside it has a frozen meaning and a frozen position, and **an unknown payload
+key makes the event invalid** — it is not ignored, not round-tripped, not
+tolerated. This is the one place where the corpus's usual
+forward-compatibility instinct is wrong: silently accepting a semantic field
+you cannot hash is precisely the failure `payload` was added to close. New
+semantics arrive as a new `kind`, never as a new key in an existing payload.
+Contrast `extra`, which stays open and stays undigested, and therefore must
+never carry anything that has to be provable.
+
+**Forward compatibility for evidence attachments.** Attaching a photo or a voice
+note to a check-in is not a v1 feature and is not scheduled. This note exists
+only so that adding it later is additive rather than a format change, since the
+canonical form cannot be revised after the first signature:
+
+- Evidence is **optional**. The absence of evidence must never invalidate a
+  normal check-in, and a check-in must never require it. The default gesture
+  stays one tap.
+- Evidence lives in its own top-level object, **not** inside `payload` and
+  **not** inside the envelope — so adding it does not disturb any existing
+  digested field or its ordering.
+- Media is **referenced by content hash, never embedded.** The event commits to
+  `sha256(file)`; the bytes live outside the log. An event proves the evidence
+  existed at that point in history, and the hash proves the file has not changed
+  since. Media never enters the canonical bytes, never enters the chain, and
+  never reaches an anchor.
+
+Recording this costs nothing now and prevents Phase 2 from becoming a migration.
+It is not a commitment to build the feature; see `docs/product.md`.
 
 Hashing `name` is safe and deliberate: a hash does not reveal it. This does not
 weaken `docs/achievement-protocol.md` §3.4, which keeps habit *names* out of the
