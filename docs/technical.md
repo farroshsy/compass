@@ -1,10 +1,11 @@
 # Compass — technical
 
 This document states the stack, the data model, the flow of an event, storage,
-sync, auth, contracts, and what is deliberately deferred. Every deferred item
-carries the trigger that would make it worth building. An item with no trigger
-is not deferred; it is refused, and belongs in the non-goals in
-`docs/product.md`.
+sync, auth, contracts, what is scheduled, and what is deferred. §10 keeps those
+last two apart: **scheduled** items are decided and wait only on sequence;
+**deferred** items each carry the trigger that would make them worth building.
+An item that is neither — no date and no trigger — is refused, and belongs in
+the non-goals in `docs/product.md`.
 
 Related: `docs/achievement-protocol.md` fixes the on-disk format of an
 achievement. `docs/adr/` holds the four decisions with real alternatives.
@@ -270,7 +271,11 @@ canonical form cannot be revised after the first signature:
   stays one tap.
 - Evidence lives in its own top-level object, **not** inside `payload` and
   **not** inside the envelope — so adding it does not disturb any existing
-  digested field or its ordering.
+  digested field or its ordering. The reason is not layout, it is meaning:
+  **`payload` is what happened; evidence is what was available to observe it.**
+  A check-in is a claim by the user, and it is complete on its own. An
+  attachment is a witness to that claim, and a witness is never what makes the
+  claim true.
 - Media is **referenced by content hash, never embedded.** The event commits to
   `sha256(file)`; the bytes live outside the log. An event proves the evidence
   existed at that point in history, and the hash proves the file has not changed
@@ -915,19 +920,36 @@ nobody ever called.
 
 ---
 
-## 10. Deliberately deferred
+## 10. Scheduled, and deliberately deferred
 
-Each item states the trigger. No trigger means it is refused, not deferred, and
-belongs in the non-goals in `docs/product.md`.
+Two different things, split because conflating them was a real defect: four rows
+below used to sit in the deferred table with "Nothing" as their trigger, under a
+heading stating that no trigger means refused. A reader following that rule
+would have concluded the week-1 export and the week-4 verifier were refused
+features.
+
+### 10a. Scheduled — already committed, no trigger needed
+
+These are decided. They wait on sequence, not on evidence.
+
+| Item | When |
+|---|---|
+| **Export / import round-trip** | **Week 1.** The insurance policy that turns any future rewrite into a re-projection instead of a reset. Export is a **bundle**, per §8 — not the log alone. |
+| **Interactive Home Screen widget** | **Week 2.** Takes the loop from ~3 s to ~0.7 s and is the highest value item per line of code in the project. App Intents must exist first, as substrate. |
+| **Weekly anchoring of the event-log head** | **Week 4**, alongside `OpenTimestampsAttestor`, before `CertificateView` can claim anything about the past. The old trigger — "the first time a newly-shipped rule backfills a historical achievement" — reads as distant but is guaranteed to fire on the *first* run of the week-3 engine, which backfills 7-day and 30-day awards over history accumulated since week 1. ADR 0004 states the consequence: without prior weekly anchoring such an award's anchor "proves only June". Needs only a digest and `Calendars`, and is ~52 free submissions a year. |
+| **A standalone verifier script** | **Week 4.** ~200 lines, no dependency on the app, shipped in this repository. The mission sentence promises a stranger can check the record without trusting the app; that is not achievable if the stranger must reimplement a hand-written encoder from a document. See `docs/product.md`. |
+
+### 10b. Deferred — each waits on a trigger
+
+Each item states the trigger. **No trigger means it is refused, not deferred,**
+and belongs in the non-goals in `docs/product.md`.
 
 | Item | Trigger to build it |
 |---|---|
-| **Interactive Home Screen widget** | Nothing. Build it in week 2 — it takes the loop from ~3 s to ~0.7 s and is the highest value item per line of code in the project. App Intents must exist first, as substrate. |
 | **Control Center control / Action Button** | The widget has been in daily use for a month **and** the thumb is demonstrably somewhere other than the home screen. "Once the App Intent exists" was not a trigger, it was a permission — every extra entry point is another place the tap path must stay correct and another place a wrong day boundary or a lost write can hide. |
 | **`AppShortcutsProvider` Siri phrases** | A Shortcuts automation is actually wanted. App Intents ship in week 2 as substrate for the widget; registering spoken phrases is a separate, user-facing surface that has to be memorised, and the widget already takes the loop to ~0.7 s. |
 | **Lock Screen / StandBy widget** | Cheap, same timeline provider. Verify on device whether `Button` is genuinely interactive in accessory families before designing a tap into it; treat as read-only until confirmed. |
 | **OpenTimestamps anchoring** | Week 4, after the certificate exists and is sealed locally. Not before — a local seal is already a complete, honest artifact. |
-| **Weekly anchoring of the event-log head** | **Not deferred. Week 4, alongside `OpenTimestampsAttestor`, before `CertificateView` can claim anything about the past.** The old trigger — "the first time a newly-shipped rule backfills a historical achievement" — reads as distant but is guaranteed to fire on the *first* run of the week-3 engine, which backfills 7-day and 30-day awards over history the app has been accumulating since week 1. ADR 0004 states the consequence: without prior weekly anchoring such an award's anchor "proves only June". It needs only a digest and `Calendars`, and is ~52 free submissions a year. |
 | **Four remaining rule evaluator kinds** | A rule is actually wanted that `streak` and `total` cannot express. Tripwire: wanting a kind with conditionals *inside* it means stop and write Swift, because that is a DSL arriving by accident. |
 | **Neutral days (travel-bridged, or declared rest days)** | An eastward flight actually costs a day, or a rest day is genuinely wanted. This is the piece with the least confidence behind it: one event kind and one branch in the fold, for an edge case that fires perhaps twice a year. |
 | **Computed rarity** | The certificate itself feels thin in daily use. (The old trigger named a certificate *detail screen*, which is cut — see `docs/product.md`'s surface budget — so the trigger is restated against the surface that actually exists.) Must be a measurement against the user's own history under a *named* model, displayed with the model attribution inline, or not displayed at all. Never an authored tier. |
@@ -937,9 +959,7 @@ belongs in the non-goals in `docs/product.md`.
 | **Log compaction and snapshots** | §6. Measured as unnecessary through at least 10 years × 10 habits. |
 | **Soulbound token contract** | The app is in daily use, OpenTimestamps is working, and there is appetite for the learning exercise. ADR 0001 and ADR 0004. Explicitly not on the critical path — if this limb is never built, Compass is still a complete app with a Bitcoin-anchored record. |
 | **Smart account, passkeys, ERC-4337** | Only if the token contract is built. ADR 0003. |
-| **Export / import round-trip** | Nothing. Build it in week 1. It is the insurance policy that turns any future rewrite into a re-projection instead of a reset. Export is a **bundle**, per §8 — not the log alone. |
 | **Retroactive backfill of a past day** | The app has been in daily use for a month and a forgotten day has actually cost something. It is not in v1: it is the only interaction in the app that needs a date, a scroll and a decision, which makes it strictly more complex than every screen in the MVP combined, and it would land on or behind the 28-dot spine — turning the one display element on the launch screen into a control. If it is ever built it needs, in writing first: an explicit surface, an explicit reach limit in days, and a guarantee that it is unreachable from the launch path. The `source_live` / `source_backfill` partition in the protocol stays REQUIRED regardless, because it is inside the digest and cannot be added afterwards. |
-| **A standalone verifier script** | **Not deferred. Week 4.** ~200 lines, no dependency on the app, shipped in this repository. The mission sentence promises a stranger can check the record without trusting the app; that is not achievable if the stranger must reimplement a hand-written encoder from a document. See `docs/product.md`. |
 
 ---
 
