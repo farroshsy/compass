@@ -79,6 +79,89 @@ struct TodayMetricsTests {
         #expect(TodayMetrics.spareHeight(habitCount: 6, at: .accessibility5) < 0)
     }
 
+    // MARK: The budget re-derived for names that wrap
+
+    /// The single-line budget above was measured against four short names
+    /// compiled into the bundle. Names are typed by the user now, and Dynamic
+    /// Type rule 3 gives a name a second line above `accessibility1` — so the
+    /// worst case the cap has to survive is not the one that was measured, and
+    /// these are the numbers for the one that is.
+    @Test("A wrapped name costs one line, and at AX5 that is 64 points")
+    func aWrappedNameCostsALine() {
+        let single = TodayMetrics.rowHeight(at: .accessibility5)
+        let wrapped = TodayMetrics.rowHeight(at: .accessibility5, nameLines: 2)
+
+        #expect(single == 92)
+        #expect(wrapped == 156)
+        #expect(wrapped - single == 64)
+    }
+
+    /// A name cannot wrap where the line limit is 1, so asking for two lines
+    /// below `accessibility2` must not inflate the budget. Otherwise the metric
+    /// would predict an overflow the screen cannot have.
+    @Test("Below accessibility2 a second line costs nothing, because there is none")
+    func aRowThatCannotWrapDoesNotGrow() {
+        for size in DynamicTypeSize.allCases where TodayMetrics.nameLineLimit(at: size) == 1 {
+            #expect(
+                TodayMetrics.rowHeight(at: size, nameLines: 2) == TodayMetrics.rowHeight(at: size),
+                "\(size)"
+            )
+        }
+        #expect(TodayMetrics.rowHeight(at: .large, nameLines: 2) == 76)
+    }
+
+    /// The whole table, pinned, so the conclusion cannot be re-scoped by changing
+    /// a constant somewhere else on the screen.
+    @Test("The AX5 spare height, name by name")
+    func theWrappedBudgetIsPinned() {
+        let expected: [Int: CGFloat] = [0: 137, 1: 73, 2: 9, 3: -55, 4: -119]
+        for (wrapped, spare) in expected {
+            #expect(
+                abs(
+                    TodayMetrics.spareHeight(
+                        habitCount: 4, at: .accessibility5, wrappedNames: wrapped
+                    ) - spare
+                ) < 0.05,
+                "\(wrapped) wrapped names"
+            )
+        }
+    }
+
+    /// **The finding that forced the layout to change.** Two wrapped names fit
+    /// with 9 points to spare; three do not fit at all. At AX3 — two sizes below
+    /// the worst case — four wrapped names already overflow.
+    ///
+    /// There is no arrangement of the other numbers that recovers it: even
+    /// collapsing the 32pt spacer to nothing leaves the worst case 87 points
+    /// short. So the screen scrolls when it does not fit rather than the settings
+    /// sheet refusing names, and ``TodayMetrics/spareHeight(habitCount:at:captionLines:wrappedNames:frameHeight:)``
+    /// records why that way round.
+    @Test("Three wrapped names overflow the frame, and no spacing change saves them")
+    func theWrappedWorstCaseDoesNotFit() {
+        #expect(TodayMetrics.spareHeight(habitCount: 4, at: .accessibility5, wrappedNames: 2) > 0)
+        #expect(TodayMetrics.spareHeight(habitCount: 4, at: .accessibility5, wrappedNames: 3) < 0)
+
+        // AX3, all four wrapped: short by 23 points.
+        let ax3 = TodayMetrics.spareHeight(habitCount: 4, at: .accessibility3, wrappedNames: 4)
+        #expect(abs(ax3 + 23) < 0.05)
+
+        // The spacer is a minimum, so the most it could give back is its own
+        // height. It is not enough.
+        let worst = TodayMetrics.spareHeight(habitCount: 4, at: .accessibility5, wrappedNames: 4)
+        #expect(worst + TodayMetrics.minimumSpacer < 0)
+    }
+
+    /// The case that is not the worst case is still the common one, and it must
+    /// be untouched: with names of ordinary length nothing about the screen
+    /// changes, at any size, which is what lets the scroll view stay inert.
+    @Test("Unwrapped names still fit at every size, with the cap unchanged")
+    func theOrdinaryCaseIsUnchanged() {
+        for size in DynamicTypeSize.allCases {
+            #expect(TodayMetrics.spareHeight(habitCount: 4, at: size) > 0, "\(size)")
+        }
+        #expect(TodayMetrics.habitCap == Projection.habitCap)
+    }
+
     // MARK: Dynamic Type rule 1 — clamp the display, never the controls
 
     @Test("The header clamps at accessibility2 and the rows do not clamp at all")

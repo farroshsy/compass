@@ -9,10 +9,21 @@ import SwiftUI
 /// hard-to-reach glyph, and never presented unprompted. Nothing here is on the
 /// launch path and nothing here may move onto it.
 ///
-/// Three things live here in this build: the habits, adding one, and the
-/// optional declared name. `docs/product.md` also budgets rename, export and the
-/// certificate list for this sheet; none of those is built yet, and this file is
-/// where they land when they are.
+/// Four things live here in this build: the habits — renamed in place and
+/// removed — adding one, restoring a removed one, and the optional declared name.
+/// `docs/product.md` also budgets export and the certificate list for this sheet;
+/// neither is built yet, and this file is where they land when they are.
+///
+/// ### Why rename is a text field and not a screen
+///
+/// `docs/product.md` justifies banning a first-launch naming flow with "renaming
+/// lives in the settings sheet, where it already belongs", and
+/// `.claude/skills/ui.md` says adding, renaming and deleting all live behind the
+/// settings glyph. Only add and remove existed, which made that justification
+/// false and — with four names seeded at the cap — made changing one name cost
+/// the user the habit's entire history: Remove then Add mints a new `HabitID`.
+/// So the name is simply editable where it is already displayed. No row to tap
+/// into, no detail screen, no fourth surface.
 ///
 /// ### The rule this screen exists to keep
 ///
@@ -33,6 +44,12 @@ public struct SettingsView: View {
     /// The habit being typed. Same reason.
     @State private var newHabitName: String = ""
 
+    /// Names being edited in place, keyed by habit. An entry exists only while
+    /// the user is mid-edit; the row falls back to the model the moment the edit
+    /// is committed or refused, so the field can never show a name the log does
+    /// not have.
+    @State private var editedNames: [HabitID: String] = [:]
+
     @Environment(\.dismiss) private var dismiss
 
     public init(model: TodayModel) {
@@ -51,7 +68,13 @@ public struct SettingsView: View {
             .navigationTitle("Settings")
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") { dismiss() }
+                    // Committing first: a name typed and not submitted is an edit
+                    // the user believes they made, and dismissing over it would
+                    // discard it in silence.
+                    Button("Done") {
+                        commitEdits()
+                        dismiss()
+                    }
                 }
             }
         }
@@ -63,7 +86,14 @@ public struct SettingsView: View {
         Section {
             ForEach(model.habits, id: \.id) { habit in
                 HStack {
-                    Text(habit.name)
+                    // Autocorrection off for the same reason as the name field
+                    // below: a habit name is a personal noun more often than not,
+                    // and a keyboard that "corrects" it is editing the record.
+                    TextField("Name", text: editableName(of: habit))
+                        .autocorrectionDisabled()
+                        .submitLabel(.done)
+                        .onSubmit { commitEdit(to: habit) }
+                        .accessibilityLabel("Name of \(habit.name)")
                     Spacer(minLength: 12)
                     Button("Remove") { model.removeHabit(habit) }
                         .buttonStyle(.borderless)
@@ -74,13 +104,32 @@ public struct SettingsView: View {
         } header: {
             Text("Habits")
         } footer: {
-            Text(
-                """
-                Removing a habit takes its row off Today. Every day it has \
-                already recorded stays in the log — nothing here is ever deleted.
-                """
-            )
+            Text(SettingsCopy.habitsFooter)
         }
+    }
+
+    /// The row's name field: the model's name until the user types, the typed
+    /// text while they are typing.
+    private func editableName(of habit: HabitState) -> Binding<String> {
+        Binding(
+            get: { editedNames[habit.id] ?? habit.name },
+            set: { editedNames[habit.id] = $0 }
+        )
+    }
+
+    /// Commits one edit. A rename is an event, so — exactly like the declared
+    /// name below — it happens once, on confirm, never on a keystroke.
+    private func commitEdit(to habit: HabitState) {
+        guard let typed = editedNames[habit.id] else { return }
+        model.rename(habit, to: typed)
+        // Whatever the model settled on is what the row shows, including a
+        // refused write: the field must not keep claiming a name the log does
+        // not have.
+        editedNames[habit.id] = nil
+    }
+
+    private func commitEdits() {
+        for habit in model.habits { commitEdit(to: habit) }
     }
 
     private var addSection: some View {
@@ -98,11 +147,7 @@ public struct SettingsView: View {
         } footer: {
             // The cap is a product rule, not a layout accident, so the sentence
             // says what it is rather than disabling a button in silence.
-            Text(
-                model.mayAddHabit
-                    ? "A habit is a name and a boolean per day. Four at a time is the limit."
-                    : "Four at a time is the limit. Remove one to add another."
-            )
+            Text(model.mayAddHabit ? SettingsCopy.addFooter : SettingsCopy.addFooterAtCap)
         }
     }
 
@@ -120,19 +165,30 @@ public struct SettingsView: View {
         newHabitName = ""
     }
 
-    /// A display, never a control. It is here so that "nothing is deleted" is
-    /// something the user can see rather than something the documentation
-    /// claims.
+    /// Proof that "nothing is deleted" is something the user can see rather than
+    /// something the documentation claims — and, since this build, the way back.
+    ///
+    /// Remove is one tap with no confirmation, which `.claude/skills/ui.md`
+    /// requires, so a mis-tap has to be undoable somewhere. Restoring appends a
+    /// `habitUnarchived`; it is the same shape as everything else here, and the
+    /// habit comes back with every day it recorded still attached.
     private var removedSection: some View {
         Section {
             ForEach(model.removedHabits, id: \.id) { habit in
-                Text(habit.name)
-                    .foregroundStyle(.secondary)
+                HStack {
+                    Text(habit.name)
+                        .foregroundStyle(.secondary)
+                    Spacer(minLength: 12)
+                    Button("Restore") { model.restoreHabit(habit) }
+                        .buttonStyle(.borderless)
+                        .disabled(!model.mayAddHabit)
+                        .accessibilityLabel("Restore \(habit.name)")
+                }
             }
         } header: {
             Text("Removed")
         } footer: {
-            Text("Kept, with every day they recorded. They do not count towards the four.")
+            Text(model.mayAddHabit ? SettingsCopy.removedFooter : SettingsCopy.removedFooterAtCap)
         }
     }
 
@@ -156,20 +212,12 @@ public struct SettingsView: View {
         } header: {
             Text("Name on the record")
         } footer: {
-            // Every clause here is load-bearing. There is no account and no
-            // second party that could check this name — `docs/product.md` makes
-            // that a permanent non-goal — so the app must never say or imply it
-            // was verified. What it can honestly claim is the narrower thing:
-            // the name is written into the log, and a record sealed afterwards
-            // commits to that log, so the name cannot be restated later.
-            Text(
-                """
-                Optional, and nobody checks it. Saving a name records it in the \
-                log, so anything sealed afterwards carries it and it cannot be \
-                changed without breaking the seal. That proves you committed to \
-                this name at the time — not that the name is true.
-                """
-            )
+            // Every clause is load-bearing, and one of them used to be false.
+            // There is no account and no second party that could check this name
+            // — `docs/product.md` makes that a permanent non-goal — so the app
+            // must never say or imply it was verified. Nor may it claim the seal
+            // it does not have yet: see ``SettingsCopy/nameFooter``.
+            Text(SettingsCopy.nameFooter)
         }
     }
 

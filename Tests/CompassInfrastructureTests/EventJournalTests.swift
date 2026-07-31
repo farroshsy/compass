@@ -36,7 +36,7 @@ struct EventJournalTests {
             let projection = project(read.events)
             #expect(projection.isChecked(habitA, on: day("2026-07-31")))
             #expect(projection.habit(habitA)?.name == "Meditate")
-            #expect(projection.totalCheckedDays == 1)
+            #expect(projection.daysRecorded == 1)
         }
     }
 
@@ -110,7 +110,7 @@ struct EventJournalTests {
             #expect(read.isIntact)
             #expect(read.events.count == 200)
             #expect(read.events.map(\.lamport) == Array(1...200))
-            #expect(project(read.events).totalCheckedDays == 200)
+            #expect(project(read.events).daysRecorded == 200)
         }
     }
 

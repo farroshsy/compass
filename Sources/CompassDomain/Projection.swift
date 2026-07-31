@@ -14,6 +14,12 @@ public struct DayStatus: StringBacked {
     public static let missed = DayStatus(rawValue: "missed")
 }
 
+/// One archival transition, kept per day. See ``HabitState/archivalDays``.
+struct ArchivalChange: Hashable, Sendable {
+    let isArchived: Bool
+    let order: EventOrder
+}
+
 /// The state of one habit, folded out of the log.
 ///
 /// Every accumulator here is inside a habit. There are no global accumulators —
@@ -28,10 +34,23 @@ public struct HabitState: Hashable, Sendable {
     /// status, a count or a streak, and it never enters a digest.
     public private(set) var name: String
 
+    /// Whether the habit has a row **today**. For whether it had one on some
+    /// earlier day, see ``isActive(on:)`` — the two are different questions and
+    /// the spine needs the second one.
     public private(set) var isArchived: Bool
 
     /// The days currently checked in. A revoked day is absent, not marked.
     public private(set) var checkedDays: Set<Day>
+
+    /// The civil day this habit started being tracked: the `day` of the earliest
+    /// `habitCreated`, kept beside ``createdOrder`` by the same first-writer-wins
+    /// rule.
+    ///
+    /// `nil` when no creation event for this habit is in the log — a damaged log,
+    /// or a chain this build has not seen. ``isActive(on:)`` then applies no lower
+    /// bound, which is the safe direction: it can only make the spine ask for
+    /// *more*, never claim a day was complete when it was not.
+    public private(set) var createdOn: Day?
 
     /// Last-writer-wins registers, one per independently-settable value. Each
     /// holds the ``EventOrder`` of the event that currently owns it, so applying
@@ -39,6 +58,18 @@ public struct HabitState: Hashable, Sendable {
     var nameOrder: EventOrder?
     var archiveOrder: EventOrder?
     var cellOrder: [Day: EventOrder]
+
+    /// One last-writer-wins register **per day** holding the archival transitions
+    /// that happened on that day — the same shape as ``cellOrder``, and for the
+    /// same reason.
+    ///
+    /// ``isArchived`` above answers "is there a row now". This answers "was there
+    /// a row on day D", and nothing else in the fold could: the current flag has
+    /// no history in it, so a spine folded over it judges every past day against
+    /// today's settings. `habitArchived` and `habitUnarchived` both carry the day
+    /// they happened on, so the timeline is in the log already and this is a
+    /// derivation of it, not a new fact.
+    var archivalDays: [Day: ArchivalChange]
 
     /// The order of the **earliest** `habitCreated` for this habit — a
     /// first-writer-wins register, and the only one here that keeps the minimum
@@ -65,10 +96,12 @@ public struct HabitState: Hashable, Sendable {
         self.name = ""
         self.isArchived = false
         self.checkedDays = []
+        self.createdOn = nil
         self.nameOrder = nil
         self.archiveOrder = nil
         self.cellOrder = [:]
         self.createdOrder = nil
+        self.archivalDays = [:]
     }
 
     public func isChecked(on day: Day) -> Bool {
@@ -77,6 +110,37 @@ public struct HabitState: Hashable, Sendable {
 
     public func status(on day: Day) -> DayStatus {
         isChecked(on: day) ? .done : .missed
+    }
+
+    /// Whether this habit was being tracked on `day` — whether it had a row on
+    /// the screen that day, and therefore whether that day's dot is entitled to
+    /// ask about it.
+    ///
+    /// **Tracking runs from the day the habit was created up to, but not
+    /// including, the day it was archived** — `[createdOn, archivedOn)`, with an
+    /// unarchive re-opening the interval from the day it happened. Three
+    /// consequences, all of them the point:
+    ///
+    /// - A day before the habit existed is not judged against it. Creating a
+    ///   habit cannot turn yesterday's dot off.
+    /// - A day the habit was tracked through stays judged against it forever.
+    ///   Archiving cannot turn a day the user missed into a day they made.
+    /// - The one day an archive *does* change is the day it happens on, forward
+    ///   from the moment of the tap — never a settled past day. That is also what
+    ///   makes a mis-tapped Remove undoable in the record and not only in the
+    ///   interface: create and archive on the same day leaves an empty interval
+    ///   and no mark on the spine at all.
+    public func isActive(on day: Day) -> Bool {
+        if let createdOn, day < createdOn { return false }
+        var latest: (day: Day, change: ArchivalChange)?
+        for (transitionDay, change) in archivalDays where transitionDay <= day {
+            if let current = latest, transitionDay < current.day { continue }
+            // Two transitions on one day are already resolved into one entry by
+            // `setArchived`, so a strictly-later day is the only tiebreak needed.
+            latest = (transitionDay, change)
+        }
+        guard let latest else { return true }
+        return !latest.change.isArchived
     }
 
     // MARK: Fold
@@ -93,10 +157,17 @@ public struct HabitState: Hashable, Sendable {
         nameOrder = order
     }
 
-    fileprivate mutating func setArchived(_ archived: Bool, at order: EventOrder) {
-        guard HabitState.wins(order, over: archiveOrder) else { return }
-        isArchived = archived
-        archiveOrder = order
+    /// Both registers, from one event. The flag answers "is there a row now"; the
+    /// per-day entry answers "was there a row on `day`". They are written
+    /// together and read apart.
+    fileprivate mutating func setArchived(_ archived: Bool, on day: Day, at order: EventOrder) {
+        if HabitState.wins(order, over: archiveOrder) {
+            isArchived = archived
+            archiveOrder = order
+        }
+        if HabitState.wins(order, over: archivalDays[day]?.order) {
+            archivalDays[day] = ArchivalChange(isArchived: archived, order: order)
+        }
     }
 
     fileprivate mutating func setChecked(_ checked: Bool, on day: Day, at order: EventOrder) {
@@ -109,13 +180,46 @@ public struct HabitState: Hashable, Sendable {
         }
     }
 
-    /// First writer wins. See ``createdOrder``.
-    fileprivate mutating func noteCreated(at order: EventOrder) {
+    /// Absorbs another view of the same habit — the shard-merge path.
+    ///
+    /// It is here rather than in ``Projection/merge(_:)`` because every register
+    /// it touches belongs to this type, and two of them (the current archive flag
+    /// and the per-day timeline) must be merged from the register that carries
+    /// them rather than from each other: a shard that saw only an unarchive must
+    /// not be able to erase a day another shard recorded an archive on.
+    fileprivate mutating func absorb(_ incoming: HabitState) {
+        if let order = incoming.nameOrder {
+            setName(incoming.name, at: order)
+        }
+        if let order = incoming.createdOrder {
+            noteCreated(on: incoming.createdOn, at: order)
+        }
+        if let order = incoming.archiveOrder, HabitState.wins(order, over: archiveOrder) {
+            isArchived = incoming.isArchived
+            archiveOrder = order
+        }
+        for (day, change) in incoming.archivalDays
+        where HabitState.wins(change.order, over: archivalDays[day]?.order) {
+            archivalDays[day] = change
+        }
+        for (day, order) in incoming.cellOrder {
+            setChecked(incoming.checkedDays.contains(day), on: day, at: order)
+        }
+    }
+
+    /// First writer wins, and the day comes with it. See ``createdOrder`` and
+    /// ``createdOn`` — they are one register with two halves, because "when was
+    /// this habit created" has one answer and a later duplicate is not it.
+    fileprivate mutating func noteCreated(on day: Day?, at order: EventOrder) {
         guard let incumbent = createdOrder else {
             createdOrder = order
+            createdOn = day
             return
         }
-        if order < incumbent { createdOrder = order }
+        if order < incumbent {
+            createdOrder = order
+            createdOn = day
+        }
     }
 
     /// Creation order, then the ``HabitID`` as a deterministic tiebreak. A habit
@@ -182,6 +286,20 @@ public struct Projection: Hashable, Sendable {
         habits.values.filter { !$0.isArchived }.sorted(by: HabitState.byCreation)
     }
 
+    /// The habits that were being tracked on `day`, oldest first — the set that
+    /// day is entitled to be judged against.
+    ///
+    /// **This is not ``activeHabits`` evaluated for another day, and the
+    /// difference is the whole of it.** `activeHabits` is today's set; folding a
+    /// history over it makes every past day a function of the current settings,
+    /// so creating a habit turns every earlier dot off and archiving one fills
+    /// dots that were never earned. `habitCreated`, `habitArchived` and
+    /// `habitUnarchived` all carry the day they happened on, so the set is a fact
+    /// about the log rather than a setting — see ``HabitState/isActive(on:)``.
+    public func habitsActive(on day: Day) -> [HabitState] {
+        habits.values.filter { $0.isActive(on: day) }.sorted(by: HabitState.byCreation)
+    }
+
     /// The habits that have been removed from Today, oldest first.
     ///
     /// **Removing a habit archives it; it never deletes it.** A habit dropped
@@ -197,10 +315,33 @@ public struct Projection: Hashable, Sendable {
         habits.values.lazy.filter { !$0.isArchived }.count < Projection.habitCap
     }
 
-    /// The largest number on the screen. Computed from the per-habit shards on
-    /// read, never accumulated in the fold — see ``HabitState``.
-    public var totalCheckedDays: Int {
-        habits.values.reduce(0) { $0 + $1.checkedDays.count }
+    /// The largest number on the screen: **how many distinct civil days anything
+    /// was recorded on.** `docs/product.md` and `.claude/skills/ui.md` both call
+    /// it "total days", and the caption under it reads "N days recorded since
+    /// <date>", so it has to be a count of days.
+    ///
+    /// It used to be `checkedDays.count` summed across habits, which is a count
+    /// of habit-days: four habits done this morning displayed "4 days recorded"
+    /// on the first day of use. Nothing on the screen was a lie about a habit —
+    /// the sum was correct — but the sentence the screen says was false, and the
+    /// sentence is what a person reads.
+    ///
+    /// **A day counts when anything was recorded on it, not when everything
+    /// was.** The word on screen is "recorded", not "completed"; a day with one
+    /// of four habits done is a day the user opened the app and recorded
+    /// something, and calling it zero would be the same class of error in the
+    /// other direction. Every-habit completion is what the 28-dot spine already
+    /// means, and it is deliberate that the two say different things: the number
+    /// cannot reset and cannot be gamed, and the spine is honest about gaps.
+    ///
+    /// Computed from the per-habit shards on read, never accumulated in the fold
+    /// — see ``HabitState``.
+    public var daysRecorded: Int {
+        var days: Set<Day> = []
+        for habit in habits.values {
+            days.formUnion(habit.checkedDays)
+        }
+        return days.count
     }
 
     /// The earliest day any habit was checked in on, or `nil` when nothing has
@@ -212,7 +353,7 @@ public struct Projection: Hashable, Sendable {
     /// number in place of the bare word "days".
     ///
     /// Computed from the per-habit shards on read, exactly like
-    /// ``totalCheckedDays``, and never accumulated in the fold. A minimum kept
+    /// ``daysRecorded``, and never accumulated in the fold. A minimum kept
     /// as a global accumulator would be order-dependent under revocation, which
     /// is the class of bug the shard-invariance test in `docs/technical.md`
     /// §9.3 exists to forbid.
@@ -235,14 +376,14 @@ public struct Projection: Hashable, Sendable {
             // Only a creation establishes creation order. A rename is cosmetic
             // and must not move a habit's row.
             if event.kind == .habitCreated {
-                habit.noteCreated(at: event.order)
+                habit.noteCreated(on: event.day, at: event.order)
             }
             habits[id] = habit
 
         case .habitArchived, .habitUnarchived:
             guard let id = event.payload.habitID else { return }
             var habit = habits[id] ?? HabitState(id: id)
-            habit.setArchived(event.kind == .habitArchived, at: event.order)
+            habit.setArchived(event.kind == .habitArchived, on: event.day, at: event.order)
             habits[id] = habit
 
         case .checkedIn, .checkInRevoked:
@@ -268,18 +409,7 @@ public struct Projection: Hashable, Sendable {
                 habits[id] = incoming
                 continue
             }
-            if let order = incoming.nameOrder {
-                mine.setName(incoming.name, at: order)
-            }
-            if let order = incoming.archiveOrder {
-                mine.setArchived(incoming.isArchived, at: order)
-            }
-            if let order = incoming.createdOrder {
-                mine.noteCreated(at: order)
-            }
-            for (day, order) in incoming.cellOrder {
-                mine.setChecked(incoming.checkedDays.contains(day), on: day, at: order)
-            }
+            mine.absorb(incoming)
             habits[id] = mine
         }
     }

@@ -126,6 +126,159 @@ struct SettingsTests {
         #expect(try #require(recorder.last).payload.name == "Stretch")
     }
 
+    // MARK: Renaming
+
+    /// The rule this test exists for is the one `docs/technical.md` §3 states
+    /// about `habitRenamed`: **cosmetic, never affects the fold.** What that means
+    /// to a person is that changing the label on a row does not cost them the row.
+    ///
+    /// Before rename existed, the only way to change a name at the four-habit cap
+    /// was Remove then Add, which mints a new `HabitID` — so the sixty days behind
+    /// the old name went behind an archived row and the new row started at zero.
+    /// Every assertion below is about the history surviving, not about the event.
+    @Test("Renaming a habit keeps its identity, its days and its place")
+    func renamingKeepsEverythingButTheLabel() throws {
+        let seeded = seededFour()
+        let log = seeded + [
+            checkIn(HabitID(rawValue: "habit-1"), on: "2026-07-30", lamport: 5),
+            checkIn(HabitID(rawValue: "habit-1"), on: "2026-07-31", lamport: 6),
+        ]
+        let recorder = FakeRecorder(continuing: log)
+        let model = model(events: log, recorder: recorder)
+
+        let read = try #require(model.habits.first { $0.name == "Read" })
+        #expect(model.rename(read, to: "Read a book"))
+
+        // The label changed.
+        #expect(model.habits.map(\.name) == ["Move", "Read a book", "Build", "Reflect"])
+        // Nothing else did: same habit, same days, same position, same total.
+        let renamed = try #require(model.habits.first { $0.id == read.id })
+        #expect(renamed.checkedDays == read.checkedDays)
+        #expect(model.habits.map(\.id)[1] == read.id)
+        #expect(model.totalDays == 2)
+        #expect(model.removedHabits.isEmpty)
+        #expect(model.projection.habits.count == Projection.habitCap)
+    }
+
+    @Test("Renaming at the cap is possible at all")
+    func renamingIsNotBlockedByTheCap() throws {
+        // The case that forced this feature: four names seeded at the limit, so
+        // Remove-then-Add is not even available without first losing a habit.
+        let seeded = seededFour()
+        let model = model(events: seeded, recorder: FakeRecorder(continuing: seeded))
+
+        #expect(!model.mayAddHabit)
+        #expect(model.rename(try #require(model.habits.first), to: "Walk"))
+        #expect(model.habits.map(\.name) == ["Walk", "Read", "Build", "Reflect"])
+    }
+
+    @Test("A rename writes a habitRenamed carrying the habit's own identifier")
+    func renamingAppendsARename() throws {
+        let seeded = Array(seededFour().prefix(2))
+        let recorder = FakeRecorder(continuing: seeded)
+        let model = model(events: seeded, recorder: recorder)
+
+        let read = try #require(model.habits.last)
+        #expect(model.rename(read, to: "  Read a book  "))
+
+        let event = try #require(recorder.last)
+        #expect(event.kind == .habitRenamed)
+        #expect(event.payload.habitID == read.id)
+        #expect(event.payload.name == "Read a book")
+        #expect(event.source == nil)
+    }
+
+    @Test("A blank or unchanged name writes nothing")
+    func renamesThatChangeNothingWriteNothing() throws {
+        let seeded = Array(seededFour().prefix(2))
+        let recorder = FakeRecorder(continuing: seeded)
+        let model = model(events: seeded, recorder: recorder)
+        let move = try #require(model.habits.first)
+
+        #expect(!model.rename(move, to: ""))
+        #expect(!model.rename(move, to: "   \n "))
+        #expect(!model.rename(move, to: "Move"))
+        #expect(!model.rename(move, to: "  Move  "))
+
+        #expect(recorder.recorded.isEmpty)
+        #expect(model.habits.map(\.name) == ["Move", "Read"])
+    }
+
+    @Test("A rename that fails to write changes nothing on screen")
+    func aFailedRenameChangesNothing() throws {
+        let seeded = Array(seededFour().prefix(2))
+        let model = model(
+            events: seeded, recorder: FakeRecorder(continuing: seeded, fails: true)
+        )
+
+        #expect(!model.rename(try #require(model.habits.first), to: "Walk"))
+        #expect(model.habits.map(\.name) == ["Move", "Read"])
+    }
+
+    // MARK: Restoring — the way back from a one-tap Remove
+
+    /// Remove is one tap and `.claude/skills/ui.md` forbids a confirmation
+    /// dialog, so the interface has to hold the undo somewhere. Before this
+    /// existed the only way back was Add, which mints a new identifier — so the
+    /// user's sixty days stayed behind the removed row and the new one started at
+    /// zero. This asserts the days come back with the habit.
+    @Test("A removed habit can be put back, with every day it recorded")
+    func restoringBringsTheHistoryBack() throws {
+        let seeded = seededFour()
+        let log = seeded + [
+            checkIn(HabitID(rawValue: "habit-1"), on: "2026-07-30", lamport: 5),
+            checkIn(HabitID(rawValue: "habit-1"), on: "2026-07-31", lamport: 6),
+        ]
+        let recorder = FakeRecorder(continuing: log)
+        let model = model(events: log, recorder: recorder)
+
+        let read = try #require(model.habits.first { $0.name == "Read" })
+        model.removeHabit(read)
+        #expect(model.habits.map(\.name) == ["Move", "Build", "Reflect"])
+
+        #expect(model.restoreHabit(try #require(model.removedHabits.first)))
+
+        // Back in its own place, not appended to the end, and still holding the
+        // two days it recorded before the mis-tap.
+        #expect(model.habits.map(\.name) == ["Move", "Read", "Build", "Reflect"])
+        #expect(model.removedHabits.isEmpty)
+        #expect(try #require(model.habits.first { $0.id == read.id }).checkedDays.count == 2)
+        #expect(model.totalDays == 2)
+
+        let event = try #require(recorder.last)
+        #expect(event.kind == .habitUnarchived)
+        #expect(event.payload.habitID == read.id)
+        #expect(event.source == nil)
+    }
+
+    @Test("Restoring a fifth habit is refused, and nothing is written")
+    func restoringRespectsTheCap() throws {
+        let seeded = seededFour()
+        let recorder = FakeRecorder(continuing: seeded)
+        let model = model(events: seeded, recorder: recorder)
+
+        // Remove one, add a replacement — now four are active and one is removed.
+        model.removeHabit(try #require(model.habits.first))
+        model.addHabit(named: "Stretch")
+        #expect(model.habits.count == Projection.habitCap)
+
+        let written = recorder.recorded.count
+        #expect(!model.restoreHabit(try #require(model.removedHabits.first)))
+        #expect(recorder.recorded.count == written)
+        #expect(model.habits.count == Projection.habitCap)
+        #expect(model.removedHabits.count == 1)
+    }
+
+    @Test("Restoring something that is not removed does nothing")
+    func restoringAnActiveHabitIsANoOp() throws {
+        let seeded = Array(seededFour().prefix(2))
+        let recorder = FakeRecorder(continuing: seeded)
+        let model = model(events: seeded, recorder: recorder)
+
+        #expect(!model.restoreHabit(try #require(model.habits.first)))
+        #expect(recorder.recorded.isEmpty)
+    }
+
     // MARK: The cap
 
     @Test("A fifth active habit is refused, and nothing is written")
@@ -291,6 +444,64 @@ struct SettingsTests {
 
         await model.reconcile()
         #expect(model.declaredName == "Farros Hilmi Syafei")
+    }
+
+    // MARK: What the sheet claims
+
+    /// The footer under the name field used to say that anything sealed
+    /// afterwards "cannot be changed without breaking the seal". There is no
+    /// seal: in week 1a there is no `content_hash`, no chain and no signature,
+    /// and every event's `prev` is 32 zero bytes. The log is a text file, and a
+    /// name in it can be edited with nothing left over to notice.
+    ///
+    /// Both halves are asserted together on purpose. The first pins the state of
+    /// the world that makes the claim false; the second pins the claim. When the
+    /// chain lands in week 1b the first assertion fails — which is the point:
+    /// that is the moment this copy is allowed to say more, and the test is what
+    /// will say so rather than nobody noticing for a month.
+    @Test("The sheet does not claim a seal this build does not have")
+    func theFooterClaimsOnlyWhatIsTrue() throws {
+        let seeded = Array(seededFour().prefix(2))
+        let recorder = FakeRecorder(continuing: seeded)
+        let model = model(events: seeded, recorder: recorder)
+
+        model.declare(name: "Farros Hilmi Syafei")
+        model.addHabit(named: "Stretch")
+
+        // Nothing chains anything to anything.
+        #expect(recorder.recorded.count == 2)
+        #expect(recorder.recorded.allSatisfy { $0.prev == Event.genesisPrev })
+
+        // So no sentence in the sheet may imply otherwise.
+        let copy = [
+            SettingsCopy.nameFooter,
+            SettingsCopy.habitsFooter,
+            SettingsCopy.removedFooter,
+            SettingsCopy.removedFooterAtCap,
+            SettingsCopy.addFooter,
+            SettingsCopy.addFooterAtCap,
+        ]
+        for sentence in copy {
+            for claim in SettingsCopy.unearnedClaims {
+                #expect(
+                    !sentence.lowercased().contains(claim),
+                    "\"\(claim)\" is a claim about cryptography this build does not ship"
+                )
+            }
+        }
+    }
+
+    /// The half of the old footer the verification pass judged correct, kept: the
+    /// app has no account, no server and no second party, and can never acquire
+    /// one, so it must never imply the name was checked by anybody.
+    @Test("The sheet still says nobody checks the name")
+    func theDisclaimerSurvives() {
+        let footer = SettingsCopy.nameFooter.lowercased()
+        #expect(footer.contains("nobody checks it"))
+        #expect(footer.contains("not"))
+        #expect(footer.contains("true"))
+        // And it says what saving actually does: it writes the name into the log.
+        #expect(footer.contains("log"))
     }
 
     /// The replay wins, but it cannot win over an event it never saw. Both folds
