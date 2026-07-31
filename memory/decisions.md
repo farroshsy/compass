@@ -318,3 +318,27 @@ or an anchor.
 This is NOT a decision to build evidence capture. It is a constraint on how it
 would be built, written down while the canonical form is still open, because
 after the first signature it cannot be revised. See `technical.md` §3.
+
+---
+
+## 2026-07-31 — design mode ends, execution mode begins
+
+**Frozen before the first line of code:**
+
+- the canonical event form, including `payload` — irreversible after the first
+  signature, verified by two mechanical sweeps
+- the `payload` / `extra` boundary: what is proven versus what is metadata
+- the evidence invariant: optional, hash-referenced, never in canonical bytes
+- scheduled versus deferred versus refused, kept apart in `technical.md` §10
+- non-goal classification, PROPOSED and awaiting confirmation
+
+**Still flexible, deliberately:** UI detail, implementation choices, storage
+optimisation, module boundaries below Domain⊥Infrastructure, future surfaces,
+and the roadmap's route (never its destination — `PROJECT_CONSTITUTION.md` §11).
+
+From here, `PROJECT_CONSTITUTION.md` §9 governs: assume the architecture is
+correct and execute it. Documents change only when code reveals a real
+contradiction, and then in the same change.
+
+**First milestone, in full:** install the app, create two habits, tap, close,
+open it tomorrow, and it still knows.

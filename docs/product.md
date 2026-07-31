@@ -258,6 +258,37 @@ that entire layer.
 Publishing the repository is fine. Acquiring users is not, because users create
 obligations, and obligations create the pressure to rewrite.
 
+### Classification — permanent, or Phase 1?
+
+**Status: PROPOSED, 2026-07-31. Awaiting confirmation.** Until confirmed every
+entry above behaves as it always has: hard, overturned only in writing in
+`memory/decisions.md`.
+
+The question applied to each is **not** "could this be built later?" — almost
+anything could. It is: **if Compass did this, would it still be Compass?**
+
+| Non-goal | Proposed | Why |
+|---|---|---|
+| Protocol for others | **Permanent** | A second consumer imports versioning politics and compatibility debt. Turns a product into infrastructure. |
+| Multiple users, accounts, social | **Permanent** | Converts a private record into a performance, and a performance is a thing you fake. |
+| A server or backend | **Permanent** | An operational dependency is a way to stop working on a Tuesday. The OpenTimestamps exception is already named above. |
+| Gamification | **Permanent** | A token is something you farm. Farming a record is faking it. |
+| Streak as the headline number | **Permanent** | A number that resets to zero teaches starting over — the exact behaviour this project defends against. |
+| Timed habits, notes, tags, schedules, templates | **Permanent** | "A habit is a name and a boolean per day" *is* the product. Each addition puts a decision inside a loop whose purpose is having none. |
+| A daily reminder notification | **Permanent** | A streak-defence notification by function, whatever it is called. Contradicts the streak entry. The widget is the reminder. |
+| Live Activities, Dynamic Island | **Permanent, by reason** | A daily boolean has no in-flight state. Refused on fit, not taste — if the product ever gains in-flight state the reason evaporates and this is re-argued from scratch. |
+| Android, web, CLI | **Permanent** | Multiplying platforms multiplies the surface that must stay correct, for one user. |
+| Blockchain concepts visible to the user | **Permanent** | Stated above as "the definition of done for that entire layer", not a UX preference. This is the constraint ADR 0003 collides with; it must stay hard or that collision stops meaning anything. |
+| Selling, acquiring users, launch post | **Permanent** | Users create obligations; obligations create pressure to rewrite. |
+| **Editing a past day** | **Phase 1** | Already deferred with a real trigger in `technical.md` §10b, and the honesty machinery (`source_live` / `source_backfill`) is inside the digest and already exists. |
+| **More than four habits** | **Mixed** | The *principle* is permanent: the loop stays one-handed and inside the three-second promise. The *number* follows from the current bottom-anchored layout. A layout that genuinely holds more without lengthening the loop may revisit the number — never the principle. |
+| **watchOS** (within the platforms entry) | **Phase 1** | Deferred, not refused, trigger "a watch is owned". A wrist tap is the true one-second interaction and would outrank the widget. |
+
+**Why so few are Phase 1.** The genuinely temporal items were never in this
+list — they live in `technical.md` §10b with triggers attached. Dashboards,
+evidence capture and sync are not non-goals here and never were. This section
+holds identity, which is why it reads as absolute. That is what it is for.
+
 ## The restart risk
 
 This project's main failure mode is not a bug, a wrong architecture, or a
