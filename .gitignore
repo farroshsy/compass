@@ -11,5 +11,6 @@ Package.resolved
 *.xcodeproj
 *.xcworkspace
 DerivedData/
+build/
 xcuserdata/
 *.xcuserstate
