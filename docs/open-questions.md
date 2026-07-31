@@ -216,3 +216,49 @@ point named rather than settled now.
   Written as 30 in `docs/achievement-protocol.md` §7.2. That is a proposal, not
   a measured figure, and per the standing evidence rules it is labelled as one.
   **Decision point:** after the first real anchor failure, if there is one.
+
+---
+
+## The share artifact names nobody
+
+**Raised:** 2026-07-31, by a design review of the certificate.
+**Status:** open. Blocks nothing in weeks 1–2. Should be answered before week 3
+builds `CertificateView`, because the answer changes what the certificate
+renders.
+
+`docs/product.md` justifies the certificate's `ShareLink` on the grounds that a
+stranger — an employer, a coach — can verify a claim without trusting the app.
+But the same document makes accounts and sign-in permanent non-goals, so there
+is no subject in the record. The exported card states that *a device* recorded
+100 consecutive days. It does not state whose device.
+
+An unattributed record demonstrates nothing about a person. The design surfaced
+this; it is a product gap, not a layout one.
+
+### Candidate resolutions
+
+**(a) Accept it. The record is meaningful only when handed over in context.**
+You send the certificate yourself, in a conversation where you are already
+identified. The artifact proves *the record was not fabricated afterwards*,
+which is the honest and complete claim; it never claimed to prove identity.
+Costs nothing, changes no code, and is the smallest answer.
+
+**(b) An optional self-declared name, typed once, inside the digest.**
+A string the user enters — not an account, no server, no verification of the
+name itself. It is digested and sealed with everything else, so it cannot be
+changed afterwards without breaking the seal. This does not prove the name is
+true; it proves the name was committed to at the same instant as the record,
+which is a weaker but real claim, and strictly stronger than nothing.
+Costs: one field, one event kind, one line on the certificate, and a decision
+about what an empty name renders as.
+
+### What is NOT available
+
+Anything that verifies the identity itself. That requires an issuer, which
+requires a second party, which `product.md` bans as a permanent non-goal.
+
+### Deciding
+
+Owner: the human, per `PROJECT_CONSTITUTION.md` §6. Neither option overturns a
+non-goal — (b) adds a field, it does not add an account — so this needs a
+decision recorded in `memory/decisions.md`, not a non-goal overturn.
