@@ -198,6 +198,57 @@ struct TodayModelTests {
         #expect(model(events: seeded, clock: clock).isStoreAvailable)
     }
 
+    // MARK: What the degraded launch says out loud
+
+    /// **The notice was written on the screen and unsayable.**
+    ///
+    /// `TodayView`'s header is one accessibility element — its children are
+    /// merged with `.accessibilityElement(children: .combine)` and the merged
+    /// label is then replaced — so anything rendered inside it and absent from
+    /// that label is invisible to a screen reader. The store notice was one of
+    /// those children. The element announced "0 days recorded" and never said
+    /// why, which is precisely the "this app forgot everything" reading the
+    /// notice exists to prevent, and worse for the one person who cannot see the
+    /// sentence sitting two points below it.
+    ///
+    /// **What this proves, and the one line it does not.** SwiftUI's resolved
+    /// accessibility tree cannot be read from a unit test, and
+    /// `.claude/skills/testing.md` refuses out loud the two things that could
+    /// read it — snapshot tests and a broad XCUITest suite. So this asserts the
+    /// string the view hands to `.accessibilityLabel`, not the label VoiceOver
+    /// finally resolves. The unproven step is exactly one line,
+    /// `.accessibilityLabel(model.spokenCaption)`, and it is named here rather
+    /// than papered over. What makes it hard to get wrong is the naming: the
+    /// property that is only ever *shown* is `caption`, the one that is *said*
+    /// is ``TodayModel/spokenCaption``, and the header renders both.
+    @Test("the header speaks the store notice, not only the number")
+    func theStoreNoticeIsSpoken() {
+        let clock = ScriptedClock("2026-07-31T09:00:00+07:00")
+        let degraded = model(
+            events: [],
+            clock: clock,
+            recorder: FakeRecorder(fails: true),
+            source: FakeSource(fails: true),
+            isStoreAvailable: false
+        )
+
+        // The number is still said. The notice qualifies it rather than
+        // replacing it: a reader that announced only the failure would be as
+        // partial as one that announced only the zero.
+        #expect(degraded.spokenCaption.contains(degraded.caption))
+        #expect(degraded.spokenCaption.contains(TodayCaption.storeNotice))
+
+        // One string, shown and spoken, so the two cannot drift apart.
+        #expect(TodayCaption.storeNotice.contains("cannot reach its store"))
+    }
+
+    @Test("a store that opened adds nothing to what the header says")
+    func anAvailableStoreSpeaksTheCaptionAlone() {
+        let clock = ScriptedClock("2026-07-31T09:00:00+07:00")
+        let working = model(events: seeded, clock: clock)
+        #expect(working.spokenCaption == working.caption)
+    }
+
     @Test("a composed store hands the model every port it resolved")
     func composedStoreInitialisesTheModel() throws {
         // The launch initialiser. It exists so `App/` — which `swift test` does
@@ -290,8 +341,8 @@ struct TodayModelTests {
     func removingAHabitLeavesThePastAlone() throws {
         let clock = ScriptedClock("2026-07-31T09:00:00+07:00")
         let start = day("2026-07-31").adding(-(TodayModel.spineLength - 1))
-        let missed = start.adding(16)
-
+        // Offset 16 is the missed day, and it is written as an index throughout
+        // because that is what indexes the spine the assertions read.
         var log = fullFortnight(habitA, endingOn: "2026-07-31")
         log.append(created(habitB, name: "Read", lamport: 2, on: start))
         for offset in 0..<TodayModel.spineLength where offset != 16 {

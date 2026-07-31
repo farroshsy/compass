@@ -292,8 +292,14 @@ line on the certificate, lands with `CertificateView` in week 3.
 ## The Today screen was built from the design, and three things were not
 
 **Raised:** 2026-07-31, implementing the design document's turn-6 Today screen.
-**Status:** open. Blocks nothing. Two of the three are unreachable in the app as
-built.
+**Status:** open, and narrower than it was. Blocks nothing.
+
+Both entries recorded here as unreachable in the app as built are now reachable,
+and each said so through its own falsifier. The settings glyph shipped with the
+sheet — entry 1 is closed. Four habits are seeded and the sheet mints more, so
+every colour in the palette renders on first launch — entry 2's trigger has
+fired, and it has stopped being a dormant note about code nobody can see and
+become a live design question about the screen the owner opens every morning.
 
 The screen now matches the specification — 44pt number, the caption sentence,
 the 9pt/2pt spine, deep-field checked rows with a rounded-square mark, and the
@@ -345,9 +351,18 @@ keep their system hue and saturation and take the brightness that lands on the
 mean of those, which reproduces the property the design actually argued from —
 the contrast measurement — rather than a factor it never states.
 
-This is low-stakes today: there is no surface for creating a third or fourth
-habit, so those two rows cannot appear. It is recorded because the first time
-they can appear, someone should look at them.
+**This was recorded as low-stakes because "there is no surface for creating a
+third or fourth habit, so those two rows cannot appear". Both halves of that are
+now false, and the note said to look at the colours the first time they could
+appear. That time is now.** `AppComposition.seededHabits` seeds **four** habits —
+Move, Read, Build, Reflect — so indigo and pink are on the screen on first
+launch, before the user has done anything at all, and the settings sheet mints
+more after that. Nothing about the derivation changed; what changed is that six
+values computed to satisfy a contrast measurement are now what the owner looks
+at every morning, and **nobody has ever looked at them as colours.** They are
+arithmetic that passes a test, not a palette anyone chose. The open question is
+no longer "are these plausible" but "are these right", and only an eye can
+answer it.
 
 **Falsifier:** the designer supplies the four missing values. They replace these
 with no other change — see `HabitTint`.

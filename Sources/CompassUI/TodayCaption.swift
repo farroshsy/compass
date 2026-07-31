@@ -16,7 +16,10 @@ import Foundation
 public enum TodayCaption {
 
     /// - Parameters:
-    ///   - totalDays: habit-days recorded, the number above this line.
+    ///   - totalDays: **distinct civil days** anything was recorded on — the
+    ///     number above this line. Not habit-days: the sum across habits showed
+    ///     "4 days recorded" for one morning's four taps, which made this
+    ///     sentence false. ``CompassDomain/Projection/daysRecorded``.
     ///   - firstDay: the earliest day any habit was checked in on, or `nil` when
     ///     nothing has been recorded yet.
     public static func text(
@@ -32,6 +35,35 @@ public enum TodayCaption {
             return "\(totalDays) \(unit) recorded"
         }
         return "\(totalDays) \(unit) recorded since \(formatted(firstDay, locale: locale))"
+    }
+
+    // MARK: The store notice, shown and spoken
+
+    /// The sentence the header shows when the store could not be opened.
+    ///
+    /// Kept here rather than inline in ``TodayView`` for the reason
+    /// ``SettingsCopy`` exists: it makes a claim about what the app is and is
+    /// not doing, and the two places that have to say it — the visible line and
+    /// what VoiceOver reads — must be one string or they will drift apart. They
+    /// already had.
+    public static let storeNotice = "Compass cannot reach its store. Taps are not being saved."
+
+    /// What VoiceOver reads for the header block, which is one element.
+    ///
+    /// **The notice was written on the screen and unreachable to anyone not
+    /// looking at it.** The header's children are merged with
+    /// `.accessibilityElement(children: .combine)` and the merged label is then
+    /// replaced by the caption, so the element announced "0 days recorded" and
+    /// the sentence explaining *why* it said zero was never spoken. For a
+    /// VoiceOver user the degraded launch therefore read as an app that had
+    /// forgotten everything — precisely the reading that notice exists to
+    /// prevent.
+    ///
+    /// It leads with the caption rather than the notice because the caption is
+    /// what the element is: the notice is the qualification, and a qualification
+    /// spoken before the thing it qualifies is a sentence read backwards.
+    public static func spokenHeader(caption: String, isStoreAvailable: Bool) -> String {
+        isStoreAvailable ? caption : "\(caption). \(storeNotice)"
     }
 
     /// Renders a ``Day`` as a human date in the reader's locale.

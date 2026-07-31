@@ -37,24 +37,18 @@ public struct SettingsView: View {
 
     private let model: TodayModel
 
-    /// The name being typed. Local, not bound to the model: a keystroke must not
-    /// append an event. The declaration happens once, on confirm.
-    @State private var typedName: String
-
-    /// The habit being typed. Same reason.
-    @State private var newHabitName: String = ""
-
-    /// Names being edited in place, keyed by habit. An entry exists only while
-    /// the user is mid-edit; the row falls back to the model the moment the edit
-    /// is committed or refused, so the field can never show a name the log does
-    /// not have.
-    @State private var editedNames: [HabitID: String] = [:]
+    /// Everything typed and not yet confirmed, and every rule about what
+    /// happens to it. Local, not bound to the model: a keystroke must not append
+    /// an event. See ``SettingsEdits`` for why the sheet's behaviour is a value
+    /// beside this file rather than three `@State` properties inside it — two
+    /// data bugs lived in those properties, where nothing could test them.
+    @State private var edits: SettingsEdits
 
     @Environment(\.dismiss) private var dismiss
 
     public init(model: TodayModel) {
         self.model = model
-        _typedName = State(initialValue: model.declaredName)
+        _edits = State(initialValue: SettingsEdits(model))
     }
 
     public var body: some View {
@@ -70,9 +64,11 @@ public struct SettingsView: View {
                 ToolbarItem(placement: .confirmationAction) {
                     // Committing first: a name typed and not submitted is an edit
                     // the user believes they made, and dismissing over it would
-                    // discard it in silence.
+                    // discard it in silence. **Every** field, including the
+                    // declared name — see ``SettingsEdits/commitAll(into:)``,
+                    // which is where that sentence became true.
                     Button("Done") {
-                        commitEdits()
+                        edits.commitAll(into: model)
                         dismiss()
                     }
                 }
@@ -92,10 +88,12 @@ public struct SettingsView: View {
                     TextField("Name", text: editableName(of: habit))
                         .autocorrectionDisabled()
                         .submitLabel(.done)
-                        .onSubmit { commitEdit(to: habit) }
+                        .onSubmit { edits.commitName(of: habit, into: model) }
                         .accessibilityLabel("Name of \(habit.name)")
                     Spacer(minLength: 12)
-                    Button("Remove") { model.removeHabit(habit) }
+                    // Removing also discards whatever was half-typed into the
+                    // row above. ``SettingsEdits/remove(_:from:)``.
+                    Button("Remove") { edits.remove(habit, from: model) }
                         .buttonStyle(.borderless)
                         .foregroundStyle(.secondary)
                         .accessibilityLabel("Remove \(habit.name)")
@@ -112,35 +110,20 @@ public struct SettingsView: View {
     /// text while they are typing.
     private func editableName(of habit: HabitState) -> Binding<String> {
         Binding(
-            get: { editedNames[habit.id] ?? habit.name },
-            set: { editedNames[habit.id] = $0 }
+            get: { edits.name(of: habit) },
+            set: { edits.setName($0, of: habit) }
         )
-    }
-
-    /// Commits one edit. A rename is an event, so — exactly like the declared
-    /// name below — it happens once, on confirm, never on a keystroke.
-    private func commitEdit(to habit: HabitState) {
-        guard let typed = editedNames[habit.id] else { return }
-        model.rename(habit, to: typed)
-        // Whatever the model settled on is what the row shows, including a
-        // refused write: the field must not keep claiming a name the log does
-        // not have.
-        editedNames[habit.id] = nil
-    }
-
-    private func commitEdits() {
-        for habit in model.habits { commitEdit(to: habit) }
     }
 
     private var addSection: some View {
         Section {
             HStack {
-                TextField("New habit", text: $newHabitName)
+                TextField("New habit", text: $edits.newHabitName)
                     .autocorrectionDisabled()
-                    .onSubmit(add)
-                Button("Add", action: add)
+                    .onSubmit { edits.add(into: model) }
+                Button("Add") { edits.add(into: model) }
                     .buttonStyle(.borderless)
-                    .disabled(!canAdd)
+                    .disabled(!edits.canAdd(in: model))
             }
         } header: {
             Text("Add a habit")
@@ -149,20 +132,6 @@ public struct SettingsView: View {
             // says what it is rather than disabling a button in silence.
             Text(model.mayAddHabit ? SettingsCopy.addFooter : SettingsCopy.addFooterAtCap)
         }
-    }
-
-    /// A name, and a confirm. **Nothing else** — no icon, no colour, no
-    /// category, no schedule, no reminder, and no list of suggestions to pick
-    /// from. `docs/product.md` bans habit templates, and each of the others is
-    /// a decision inside a loop whose entire purpose is having none in it.
-    private var canAdd: Bool {
-        model.mayAddHabit
-            && !newHabitName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-    }
-
-    private func add() {
-        guard model.addHabit(named: newHabitName) else { return }
-        newHabitName = ""
     }
 
     /// Proof that "nothing is deleted" is something the user can see rather than
@@ -204,11 +173,11 @@ public struct SettingsView: View {
             // cannot be restated afterwards — so a keyboard that edits it is
             // editing the record. The habit field is disabled for the same
             // reason: a habit name is a personal noun more often than not.
-            TextField("Your name", text: $typedName)
+            TextField("Your name", text: $edits.typedName)
                 .autocorrectionDisabled()
-                .onSubmit(declare)
-            Button("Save", action: declare)
-                .disabled(!hasNameChanged)
+                .onSubmit { edits.commitDeclaredName(into: model) }
+            Button("Save") { edits.commitDeclaredName(into: model) }
+                .disabled(!edits.hasDeclaredNameChanged(in: model))
         } header: {
             Text("Name on the record")
         } footer: {
@@ -219,17 +188,5 @@ public struct SettingsView: View {
             // it does not have yet: see ``SettingsCopy/nameFooter``.
             Text(SettingsCopy.nameFooter)
         }
-    }
-
-    private var hasNameChanged: Bool {
-        typedName.trimmingCharacters(in: .whitespacesAndNewlines) != model.declaredName
-    }
-
-    private func declare() {
-        model.declare(name: typedName)
-        // Whatever the model settled on is what the field shows — including the
-        // trim, and including a refused write, which must not leave the field
-        // claiming something the log does not say.
-        typedName = model.declaredName
     }
 }

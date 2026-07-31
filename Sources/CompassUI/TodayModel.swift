@@ -139,6 +139,19 @@ public final class TodayModel {
         TodayCaption.text(totalDays: totalDays, firstDay: firstRecordedDay)
     }
 
+    /// What VoiceOver reads for the header, which is ``caption`` **plus the
+    /// store notice when there is one.**
+    ///
+    /// The header is a single merged accessibility element whose label is
+    /// replaced, so anything rendered inside it that is not in that label is
+    /// invisible to a screen reader. ``caption`` alone announced "0 days
+    /// recorded" on a launch where the store could not be opened, and said
+    /// nothing about why — which is the reading ``isStoreAvailable`` exists to
+    /// prevent. The label the view renders is this, never ``caption``.
+    public var spokenCaption: String {
+        TodayCaption.spokenHeader(caption: caption, isStoreAvailable: isStoreAvailable)
+    }
+
     public func isChecked(_ habit: HabitState) -> Bool {
         habit.isChecked(on: today)
     }
