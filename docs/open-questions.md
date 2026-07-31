@@ -262,3 +262,77 @@ requires a second party, which `product.md` bans as a permanent non-goal.
 Owner: the human, per `PROJECT_CONSTITUTION.md` §6. Neither option overturns a
 non-goal — (b) adds a field, it does not add an account — so this needs a
 decision recorded in `memory/decisions.md`, not a non-goal overturn.
+
+---
+
+## The Today screen was built from the design, and three things were not
+
+**Raised:** 2026-07-31, implementing the design document's turn-6 Today screen.
+**Status:** open. Blocks nothing. Two of the three are unreachable in the app as
+built.
+
+The screen now matches the specification — 44pt number, the caption sentence,
+the 9pt/2pt spine, deep-field checked rows with a rounded-square mark, and the
+six Dynamic Type rules. Three points where the document could not be followed
+literally are recorded here rather than absorbed silently.
+
+### 1. The settings glyph is not on the screen
+
+The design adds one — SF Symbols `gearshape`, 17pt, 30% ink, a 44 x 44 target
+centred at (371, 128) in the 402 x 874 frame, overhanging the margin by 11pt so
+the glyph's trailing edge lands on the margin line and the target still reaches
+44. It records this as a decision taken on the user's behalf: an addition to a
+screen whose rule is that nothing may be added, "justified only because the
+sheet is already budgeted and otherwise unreachable".
+
+**Not built, because the sheet is not built.** The settings sheet is week 3.
+`.claude/skills/ui.md` budgets three surfaces off the launch path and all three
+are week 3 or later, so a glyph shipped now is a control that opens nothing.
+The geometry above is recorded in `TodayView`'s documentation so that week 3
+places it where it was measured rather than where it looks right.
+
+**Falsifier:** the settings sheet exists. Then the glyph ships with it, at that
+position, unchanged.
+
+### 2. Six of the eight habit-row field colours are derived, not designed
+
+The document gives the deep field for two habits in light appearance
+(`teal #1B6B7A`, `orange #8A4E00`) and for one in dark (`teal`, "the same hue at
+34% over black, i.e. rgb(22,68,76)"). The palette has four entries because four
+habits is the hard cap, so six values were missing.
+
+The dark rule was **recovered, not invented**: rgb(22,68,76) is iOS's
+dark-appearance system teal `#40C8E0` multiplied by 0.34, exactly, to the byte.
+The other three dark fields follow from that rule.
+
+The light rule could not be recovered — in HSB the teal drops to 61% of the
+system colour's brightness and the orange to 54%, so no single factor produces
+both. What the two share is luminance, 0.1215 and 0.1085. So indigo and pink
+keep their system hue and saturation and take the brightness that lands on the
+mean of those, which reproduces the property the design actually argued from —
+the contrast measurement — rather than a factor it never states.
+
+This is low-stakes today: there is no surface for creating a third or fourth
+habit, so those two rows cannot appear. It is recorded because the first time
+they can appear, someone should look at them.
+
+**Falsifier:** the designer supplies the four missing values. They replace these
+with no other change — see `HabitTint`.
+
+### 3. The design's AX5 metric table is one row off for two text styles
+
+It gives `title3 20 -> 49` and `title2 22 -> 53`. Apple's published iOS table
+gives 53 and 56; 49 is Apple's *subheadline* AX5 value. Every other row in the
+design's table matches Apple exactly — body 53, footnote 44, caption2 42,
+largeTitle 60, and subheadline-at-accessibility2 30 — so the two title rows are
+a transcription slip, and the rest of the table cross-validates the corrected
+one now in `TodayMetrics`.
+
+**The load-bearing finding survives the correction**, which is the only reason
+it was safe to make. The design's claim is that four habit rows still fit at AX5
+and therefore the four-habit hard cap in `docs/product.md` survives the worst
+case; it says this is "worth knowing, because it was the least certain of the
+product's hard numbers". Recomputed with title3 at 53 and the caption counted at
+the two lines it actually takes, four rows fit with **137 points to spare**
+rather than the document's 165. `TodayMetricsTests` pins that number, so the
+next change to any constant on the screen has to re-derive it.

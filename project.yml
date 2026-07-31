@@ -40,6 +40,38 @@ targets:
         INFOPLIST_KEY_CFBundleDisplayName: Compass
         SWIFT_VERSION: "6.0"
         TARGETED_DEVICE_FAMILY: "1,2"
+        # `App/Assets.xcassets/AppIcon.appiconset` — one 1024 x 1024 image per
+        # iOS 18 appearance: default, dark and tinted. All three are opaque. The
+        # App Store rejects an alpha channel on an app icon, and the design is
+        # explicit that the ground is a solid rect in every appearance, so the
+        # PNGs are re-encoded without one on the way into the catalogue rather
+        # than shipped as exported.
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+
+# The same missing simulator runtime blocks the icon, and it is worth writing
+# down because the error names neither the icon nor the runtime as the fix:
+#
+#   App/Assets.xcassets: error: No simulator runtime version from ["22E238"]
+#   available to use with iphonesimulator SDK version 23C57
+#
+# 22E238 is iOS 18.4, the only runtime installed. 23C57 is the iOS 26.2 SDK, the
+# only SDK Xcode 26.3 ships. `actool` refuses to compile an **app icon** for a
+# simulator SDK with no matching runtime — narrowed to exactly that: the same
+# catalogue compiles cleanly the moment `ASSETCATALOG_COMPILER_APPICON_NAME` is
+# empty, and it fails identically with a single default-appearance image, so it
+# is not the three iOS 18 appearances and it is not this Contents.json.
+#
+# Installing the iOS 26.2 simulator runtime (Xcode > Settings > Components)
+# fixes it, and is the same one-line fix as the destination problem below.
+# Nothing in this file can, and nothing in this file should try — the catalogue
+# is correct, and a second loose-PNG icon path added to work around a missing
+# download would be a permanent fixture bought for a temporary problem.
+#
+# To build on this machine *without* the icon, for a screen change you want to
+# see now, override it on the command line and do not commit the override:
+#
+#   xcodebuild … ASSETCATALOG_COMPILER_APPICON_NAME=""
+
 
 # Without this block xcodegen writes no `.xcscheme` at all, and a project with
 # no scheme has no buildables — so `xcodebuild -scheme Compass -destination

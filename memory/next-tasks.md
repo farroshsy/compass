@@ -108,6 +108,10 @@ The goal of this block is a working checkbox, not a correct one. Ship it.
 
 ## Week 3 — achievements, sealed locally
 
+**The seal and certificate assets and their full specification are already in
+this repository — `Assets/seal/` and its README. Read them before designing
+anything here; nothing about the certificate needs to be invented.**
+
 - [ ] `RuleSpec` and rule JSON in the bundle. `streak` and `total` evaluators
       only; the other four kinds named but unimplemented.
 - [ ] The achievement engine, per `docs/achievement-protocol.md`. Deterministic
