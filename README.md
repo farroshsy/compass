@@ -7,16 +7,23 @@ hand to a stranger and they can check without trusting you or the app.
 
 ## What this is
 
-One screen. Two checkboxes. Under three seconds from opening the app to closing
+One screen. Four checkboxes. Under three seconds from opening the app to closing
 it. Roughly once a month a milestone falls out of the log and the app shows a
 certificate, signed on the device immediately and submitted for Bitcoin
 anchoring three days later. The certificate says "Sealed on this device" until a
 proof actually comes back confirmed, and only then adds the anchor date — it
 does not claim to be anchored before it is.
 
-A ~200-line standalone verifier ships in this repository, because "a stranger
-can check it" is not true if the stranger has to reimplement a hand-written
-encoder from a document.
+Four is the cap and the shipped seed: `AppComposition.seededHabits` is Move,
+Read, Build, Reflect, and `Projection.habitCap` is 4. `docs/product.md` scopes
+the launch path at "two to four", so two is the floor a user can reach by
+removing rows, not what installs.
+
+A ~200-line standalone verifier is part of the plan, because "a stranger can
+check it" is not true if the stranger has to reimplement a hand-written encoder
+from a document. **It is not written yet** — `memory/next-tasks.md` schedules it
+for week 4, and until it exists the mission sentence at the top describes
+something this repository does not yet ship.
 
 It has one user. It is a daily driver and a deliberate laboratory for
 infrastructure that a habit tracker does not strictly need — event sourcing with
@@ -33,25 +40,54 @@ the OpenTimestamps calendars are third-party servers; that is the project's one
 operational dependency and `docs/product.md` names it as an exception rather
 than pretending it is not one.
 
-The blockchain layer, if it is ever built, would be invisible: no wallet, no
-gas, no address, no seed phrase, never the word "mint". `docs/adr/0003` now
-records that this is **not achievable** as designed — a paper recovery key is a
-seed phrase by another name, and passkeys need a hosted file the architecture
-rules forbid — so that limb is refused rather than deferred until someone
-accepts the cost in writing.
+The blockchain layer is a **mandatory deliverable** — `PROJECT_CONSTITUTION.md`
+§3, settled on 2026-07-31 and not to be reopened — and it is meant to be
+invisible: no wallet, no gas, no address, no seed phrase, never the word "mint".
+
+What is refused is not the limb. It is **one specific design**: ADR 0003 §2.5
+finds that the embedded-wallet recovery ceremony is a seed phrase by another
+name, and passkeys need a hosted file the architecture rules forbid. So the
+chain ships; it does not ship *that way*. §14 of the constitution records this
+as a live design blocker that must be resolved before contract work begins, by
+either designing a genuinely invisible recovery path or overturning the
+invisibility non-goal in writing, dated, with the cost stated. Building anyway
+without choosing is not available.
+
+An earlier version of this section said the limb itself was "refused rather than
+deferred". That contradicted the constitution, and the constitution wins.
 
 ## Status
 
-**Documentation only. There is no code yet.**
+**Week 1a has shipped. The app builds, installs and runs.**
+
+Measured on 2026-08-01: `swift test` reports **218 tests in 23 suites passed**,
+and the history is well past its first commit. A fresh install opens on Today
+with four grey habit rows — Move, Read, Build, Reflect — a `0`, an empty 28-dot
+spine, and a settings sheet behind the glyph that can add, remove, restore and
+rename.
+
+What does not exist yet: the canonical byte encoding, the hash chain, the
+widget, achievements, signing, anchoring, and the verifier. `docs/technical.md`
+§11 has the build order and `memory/current-focus.md` has the current position
+and the next step.
 
 Five design investigations completed in July 2026. What survived them is in
-`docs/`. The first target is a walking skeleton on a real phone, in daily use,
-before anything cryptographic is written.
+`docs/`. The remaining target for week one is the walking skeleton on a real
+phone, **in daily use**, before anything cryptographic is written — and that is
+a genuine entry condition, not a slogan: week 1b does not begin until the app
+has been opened three days running.
 
 ## Where things are
 
 | Path | What it holds |
 |---|---|
+| `Sources/CompassDomain` | `Day`, `Event`, `project()`, `Projection`, the ports. Imports Foundation and nothing else |
+| `Sources/CompassApplication` | The check-in use case, between the domain and the ports |
+| `Sources/CompassInfrastructure` | `EventJournal`, `SystemClock`, `StoreLayout`, `Export`, and `AppComposition` — the composition root, which seeds the four habits |
+| `Sources/CompassUI` | `TodayView`, `HabitRow`, `SpineView`, `TodayModel`, `TodayMetrics`, and the settings sheet |
+| `App/` | The thin app target. Composition only; no product code |
+| `Tests/` | 218 tests in 23 suites — 85 domain, 72 UI, 53 infrastructure, 8 application |
+| `Assets/seal/` | The certificate seal assets and their specification, vendored for week 3 |
 | `docs/product.md` | Mission, the single user, the daily loop, MVP scope, and the non-goals — which are the most load-bearing part of the whole set |
 | `docs/technical.md` | Stack, data model, event flow, storage, sync, auth, testing, and every deferred item with the trigger that would make it worth building |
 | `docs/achievement-protocol.md` | The constitution for the achievement record. Exact fields, exact types, exact canonical bytes, so future code never invents a field |
@@ -101,12 +137,37 @@ reason it lost, and nothing in the plan requires a big-bang migration.
 
 ## Running it
 
-There is nothing to run yet.
+The tests, which need no simulator, no developer account and no device:
 
-Once there is, it will be: one Swift package plus a thin app target, generated
-with `xcodegen`, opened in Xcode, and installed on the phone via TestFlight —
-not a free development build, which expires after seven days and takes the daily
-habit with it.
+```sh
+swift test
+```
+
+The app. Both commands below were run on this machine on 2026-08-01 and the
+build reported `** BUILD SUCCEEDED **`:
+
+```sh
+xcodegen && xcodebuild -project Compass.xcodeproj -scheme Compass \
+  -destination 'platform=iOS Simulator,name=iPhone 17' -configuration Debug \
+  CONFIGURATION_BUILD_DIR=$PWD/.build/products build
+
+# `booted` resolves to a running simulator, so boot one first — with several
+# booted it picks one of them, not necessarily the one named above.
+xcrun simctl boot 'iPhone 17' 2>/dev/null || true
+xcrun simctl install booted .build/products/Compass.app
+xcrun simctl launch  booted dev.farros.compass
+```
+
+Or `xcodegen && open Compass.xcodeproj` and press Run.
+
+**Never pass `ASSETCATALOG_COMPILER_APPICON_NAME=""`** to work around a missing
+simulator runtime; it ships an iconless app. `project.yml` carries the full
+reasoning and the re-measurement.
+
+On the phone it goes via TestFlight — not a free development build, which
+expires after seven days and takes the daily habit with it. A free profile is
+fine for the first few days of use, and that is all week 1b's entry condition
+needs.
 
 **TestFlight substitutes a ninety-day expiry for the seven-day one; it does not
 remove the problem.** A build stops launching 90 days after upload, so a build
@@ -114,8 +175,9 @@ gets uploaded every quarter as a standing obligation. When one does expire,
 **update in place — never delete and reinstall.** Deleting the app destroys the
 App Group container and with it the entire log. `memory/known-bugs.md`.
 
-`swift test` runs the domain suite, which is pure, has no simulator dependency,
-and is where roughly eighty per cent of the tests live. **It needs no developer
-account, no provisioning profile and no device** — which is why the first
-session writes `Day` and `project()` and runs `swift test` on them, rather than
-waiting on a purchase.
+`swift test` runs the whole package suite — pure domain, the journal against a
+real filesystem, and `TodayModel` against fake ports. **It needs no developer
+account, no provisioning profile and no device**, which is why the first session
+wrote `Day` and `project()` and ran `swift test` on them rather than waiting on
+a purchase. It is still the fastest way to tell whether this repository is in a
+working state.

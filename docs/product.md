@@ -39,7 +39,13 @@ person need.
 
 ## The daily loop
 
-Open the app. Tap two checkboxes. Close the app. Under three seconds, cold.
+Open the app. Tap four checkboxes. Close the app. Under three seconds, cold.
+
+Four is what installs: `AppComposition.seededHabits` seeds Move, Read, Build and
+Reflect, and `Projection.habitCap` is 4. This line said "two" while the MVP scope
+below said "two to four" — two is the floor a user reaches by removing rows, not
+the shipped default, and the sentence that describes the daily loop should
+describe the install.
 
 That is the entire product. Everything else in this repository exists to support
 that loop or to seal what it produces. There is no second screen you are meant

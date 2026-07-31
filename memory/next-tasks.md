@@ -11,19 +11,26 @@ particular project: the documented failure mode is that 58 of 76 attempts died
 on the day they were created, and the task list made day one impossible to
 finish.
 
-Both blockers are refuted by the corpus itself:
+Both blockers were refuted by the corpus itself:
 
-- `README.md` says `swift test` runs the domain suite, which "is pure, has no
-  simulator dependency, and is where roughly eighty per cent of the tests live."
-  That suite, plus `Day`, `Event` and `project()`, needs no account, no profile
-  and no device.
+- `swift test` needs no account, no profile and no device. `Day`, `Event`,
+  `project()` and the journal are all reachable from it.
 - "Name the two habits" was blocking because "the layout, the notification hour
   and the milestone cadence all depend on them". There is no notification any
   more, and `docs/technical.md` defines `habitRenamed` as cosmetic and never
   affecting the fold — so a name is by construction the cheapest thing in the
   project to change.
 
-**Start with week 1a. Today.**
+**Settled, and it worked. Week 1a shipped on 2026-07-31.** `swift test` reports
+218 tests in 23 suites passing, a history many commits deep, and the
+app builds, installs on a simulator and launches onto four grey habit rows. This
+section is kept as the record of a blocker that was wrong, not as a live
+instruction.
+
+**What is next is not code.** Week 1b's entry condition is that the app has been
+opened three days running, and nothing in this repository says it ever has. See
+`memory/current-focus.md`; the honest next action is to put it on the phone and
+use it.
 
 ### Running in parallel, blocking nothing
 
@@ -54,21 +61,52 @@ Both blockers are refuted by the corpus itself:
 
 ## Week 1a — something tappable, on the phone, on day one
 
-The goal of this block is a working checkbox, not a correct one. Ship it.
+The goal of this block was a working checkbox, not a correct one. **It shipped
+on 2026-07-31.** Every box below except the last is ticked against the machine,
+not against another document — `swift test`, `xcodebuild`, and a screenshot of a
+fresh simulator install.
 
-- [ ] `Package.swift` with four targets; `project.yml` for xcodegen.
-- [ ] `Day` as an integer ordinal, encoded as `"YYYY-MM-DD"`. Exhaustive tests
-      first — see `.claude/skills/testing.md`. `swift test`, no device needed.
-- [ ] `Event` as a plain struct with `JSONEncoder`, and `project(_:)` as a pure
-      fold. Shard-invariance test — the highest-value single test in the project.
-- [ ] `Journal` — synchronous append of one line to an open `FileHandle`.
-      **Base URL comes from a single injected `storeURL`.** Construct a file
-      path nowhere else; that is what makes the App Group move a one-liner.
-- [ ] `TodayView`, `HabitRow`, `SpineView`, `TodayModel`. Bottom-anchored. **Four
-      habits seeded in the bundle with names already set** — Move, Read, Build,
-      Reflect, per the entry above — no first-launch naming flow, no keyboard,
-      no permission prompt.
+- [x] `Package.swift` with four targets; `project.yml` for xcodegen. Both exist;
+      `xcodegen && xcodebuild … build` reports `** BUILD SUCCEEDED **`.
+- [x] `Day` as an integer ordinal, encoded as `"YYYY-MM-DD"`. `DayTests` is
+      exhaustive — civil components round-trip for every ordinal across four
+      centuries.
+- [x] `Event` as a plain struct with `JSONEncoder`, and `project(_:)` as a pure
+      fold. `ProjectionTests` carries the shard-invariance test.
+- [x] `Journal` — `EventJournal` appends one line synchronously to an open
+      `FileHandle`, and the base URL comes from a single injected `storeURL`
+      via `StoreLayout`. Truncate-at-every-byte-offset test passes.
+- [x] `TodayView`, `HabitRow`, `SpineView`, `TodayModel`. Bottom-anchored. Four
+      habits seeded in the bundle with names already set — Move, Read, Build,
+      Reflect. No first-launch flow, no keyboard, no permission prompt.
 - [ ] **Install on the phone. Use it.** Free profile is acceptable here.
+      **This is the only unticked item in week 1a, and it is the one that
+      unlocks week 1b.** A simulator install has been demonstrated; that is a
+      build check, not use.
+
+### Landed in week 1a but scheduled nowhere
+
+Recorded rather than back-dated into the plan above, because the plan is
+evidence about what was expected and rewriting it destroys that. `docs/technical.md`
+§11 carries the same note.
+
+- [x] **The settings sheet** — `SettingsView`, `SettingsEdits`, `SettingsCopy` —
+      with add, remove (appends `habitArchived`, deletes nothing), restore, and
+      rename in place. The build order put habit management no earlier than
+      week 3; the four-habit seed made renaming the only way to change a name,
+      so it came forward.
+- [x] **The declared name on the record**, optional, never verified, and the
+      sheet says so.
+- [x] **The Record app icon**, wired into `App/Assets.xcassets` and compiling
+      into `Assets.car`.
+- [x] **`Export`** as a bundle — implemented and tested at
+      `Sources/CompassInfrastructure/Export.swift`, scheduled below in week 1b.
+      **No surface calls it yet**, so it is code the user cannot run.
+      `memory/known-bugs.md`.
+- [x] **`AppComposition`** as a composition root inside the package rather than
+      in `App/`, so the wiring is testable. `memory/decisions.md`, 2026-07-31.
+- [x] **The unopenable-store path**: the app never refuses to launch, and says
+      on screen that it is not recording. `docs/technical.md` §6.
 
 ## Week 1b — the encoding, once the app is being used
 
@@ -83,19 +121,32 @@ The goal of this block is a working checkbox, not a correct one. Ship it.
 - [ ] The one-time **`reproject`** step: replay the week-1a log into a freshly
       chained log, keeping the old file as `events.jsonl.pre-chain`. This hatch
       may be used exactly once and closes the moment anything is signed.
-- [ ] Replay-parity test. Truncate-at-every-offset crash test.
+- [ ] Replay-parity test. **The truncate-at-every-offset crash test already
+      exists** and passes — `EventJournalTests`, "truncating at every byte
+      offset drops only the partial tail".
 - [ ] Damaged-log recovery policy per `docs/technical.md` §6, with its test.
 - [ ] Move `storeURL` to the App Group container. One line plus a file move.
       Set `NSFileProtectionCompleteUntilFirstUserAuthentication`.
 - [ ] `actor EventLog` for replay and the in-memory array.
 - [ ] Snapshot cache, read synchronously in `TodayModel.init`.
-- [ ] **`export` as a bundle** — `events.jsonl` + `awards.jsonl` +
+- [x] **`export` as a bundle** — `events.jsonl` + `awards.jsonl` +
       `attestations.jsonl` + frozen rule JSON + `habits.json` + public keys +
       every `.ots` proof + `manifest.json` of per-file digests. Stated in these
       exact words in `docs/product.md`, `docs/technical.md` §8 and ADR 0002 so
       the four copies cannot drift. Not the log alone — the log alone contains
       neither the achievements nor the proofs it is claimed to preserve.
-- [ ] Bundle-restore round-trip test. An unexercised escape hatch is not one.
+      **Shipped early, in week 1a**, as `Sources/CompassInfrastructure/Export.swift`
+      with `export`, `verify` and `restore`. It writes only the artifacts whose
+      features exist, so a bundle today is `events.jsonl`, `habits.json` and
+      `manifest.json`, and gains the rest as they land.
+- [x] Bundle-restore round-trip test. An unexercised escape hatch is not one.
+      `ExportTests`.
+- [ ] **Give export a surface.** The two boxes above are ticked and the user
+      still cannot export: nothing in `CompassUI` calls `Exporter`. Until that
+      exists, the insurance policy is unreachable and the phone-loss hazard in
+      `memory/known-bugs.md` is unmitigated in practice. This is the smallest
+      remaining piece of week 1b and it is not in the original plan because the
+      plan assumed the code would arrive with its button.
 
 ## Week 2 — the widget
 
@@ -181,5 +232,9 @@ kinds. Each has a written trigger in `docs/technical.md` §10. Check the trigger
 has actually fired before starting.
 
 The chain limb additionally requires a dated entry in `memory/decisions.md`
-overturning a `docs/product.md` non-goal — see ADR 0003 §2.5. It is refused, not
-deferred, until that exists.
+overturning a `docs/product.md` non-goal — see ADR 0003 §2.5 and
+`PROJECT_CONSTITUTION.md` §14. **What that refuses is ADR 0003's specific
+recovery ceremony, not the subsystem:** §3 of the constitution makes the
+blockchain mandatory, and this line said "it is refused, not deferred" until
+2026-08-01, which reads as permission to drop it. Build it; do not build it that
+way, and resolve §14 first.

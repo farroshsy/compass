@@ -1,65 +1,125 @@
 # Current focus
 
-**As of 2026-07-31.**
+**As of 2026-08-01.**
 
-> ## The corpus is frozen
+> ## Week 1a shipped. The app builds, installs and runs.
 >
-> **No document in this repository is to be edited until `swift test` passes on
-> `Day` and `project()`.**
->
-> There are ~2,600 lines of Markdown here against zero lines of Swift and zero
-> commits. Documentation has become the work product, which is a comfortable
-> way to feel productive without taking the risk that the project is actually
-> about. `README.md` sets the standard itself — a document earns its place if it
-> stops a future session re-litigating a settled question — and that standard is
-> now met. Adding more cannot make it more met.
->
-> The one exception: `docs/open-questions.md` and `memory/` may be appended to
-> when a *decision changes*, because that is the mechanism that stops
-> re-litigation. Writing more explanation of an existing decision is not that.
+> **If you are a new session: do not start anything from scratch.** There is a
+> Swift package, an Xcode project, an app that launches, and a test suite that
+> passes. Every previous version of this file said the opposite, and a session
+> that believed it would have rebuilt what already exists — which is the exact
+> failure `PROJECT_CONSTITUTION.md` §5 exists to prevent, invited by the corpus
+> itself.
 
 ## Where the project actually is
 
-Documentation only. **No application code exists.** No `Package.swift`, no
-`project.yml`, no targets, no Xcode project. The repository contains this
-documentation set and nothing else, and it has no commits yet.
+Measured on this machine on 2026-08-01, by running the commands, not by reading
+another document.
 
-Five design investigations were completed before any code was written:
-achievement model, local-first storage, chain and contracts, identity and
-wallet, and iOS structure and UX. Their conclusions are compressed into
-`docs/` and `docs/adr/`. The investigations themselves are not in this
-repository; what survived them is.
+```
+swift test          -> 218 tests in 23 suites passed
+git rev-list --count HEAD   -> run it; a number written here is wrong by the
+                               commit that writes it
+```
+
+The app builds, installs on a simulator, and launches:
+
+```
+xcodegen && xcodebuild -project Compass.xcodeproj -scheme Compass \
+  -destination 'platform=iOS Simulator,name=iPhone 17' -configuration Debug \
+  CONFIGURATION_BUILD_DIR=$PWD/.build/products build
+
+xcrun simctl install booted .build/products/Compass.app
+xcrun simctl launch  booted dev.farros.compass
+```
+
+`** BUILD SUCCEEDED **`, and the icon is in the product — `Assets.car`,
+`AppIcon60x60@2x.png`, and `CFBundleIconName = AppIcon` under `CFBundleIcons` in
+the built `Info.plist`.
+
+**What a fresh install shows,** screenshotted from that launch: `0` at 64pt,
+"0 days recorded", an empty 28-dot spine, the settings glyph, and **four grey
+rows — Move, Read, Build, Reflect** — bottom-anchored. Grey, not coloured:
+`HabitTint` carries only *checked*-row fields and `HabitRow` fills an unchecked
+row with `Color.primary.opacity(0.06)`. Colour appears on the first check.
+
+### What exists
+
+- `Package.swift` — one package, four targets, no third-party dependencies:
+  `CompassDomain`, `CompassApplication`, `CompassInfrastructure`, `CompassUI`,
+  plus four test targets. Swift 6 language mode.
+- `project.yml` and a generated `Compass.xcodeproj`; `App/` is the composition
+  root and holds nothing else.
+- **Domain:** `Day` as an integer ordinal, `Event`, `project()` as a pure fold,
+  `Projection` with `habitCap = 4`, `Identifiers`, `JSONValue`, `Ports`,
+  `Attestation`, `ComposedStore`.
+- **Infrastructure:** `EventJournal` appending JSON Lines to an open
+  `FileHandle`, `StoreLayout`, `SystemClock` with the 04:00 boundary,
+  `WriterIdentity`, `Export`, and `AppComposition` — which seeds the four habits
+  as `habitCreated` events on a first launch and, when the store cannot be
+  opened, returns an `UnavailableStore` rather than refusing to launch.
+- **UI:** `TodayView`, `HabitRow`, `SpineView`, `TodayModel`, `TodayMetrics`,
+  `TodayCaption`, `HabitTint`, and the settings sheet — `SettingsView`,
+  `SettingsEdits`, `SettingsCopy`.
+- **The settings sheet arrived in week 1a, ahead of the plan**: add, remove
+  (archives, never deletes), restore, rename in place, and the optional declared
+  name on the record. `docs/technical.md` §11 now records that it landed early.
+- The Record app icon, and the week-3 seal assets vendored in `Assets/seal/`.
+
+### What does not exist yet
+
+No canonical byte encoding, no `content_hash`, no `prev` chaining, no App Group,
+no `actor EventLog`, no snapshot cache, no widget, no rule specs, no achievement
+engine, no `CertificateView`, no signing, no anchoring, no standalone verifier.
+All of that is week 1b and later, and all of it is listed in
+`memory/next-tasks.md`.
 
 ## What the next session should do
 
-**Write `Day` and `project()` and run `swift test`.** That is the entire
-instruction. It needs no developer account, no provisioning profile, no device
-and no product decision — the domain suite is pure and is where roughly eighty
-per cent of the tests live.
+**Week 1b — the canonical encoding and the hash chain.** `docs/technical.md` §11
+and `memory/next-tasks.md`.
 
-Then week 1a in `memory/next-tasks.md`: a tappable checkbox on the phone,
-installed and used. Then, and only after the app has been opened three days
-running, week 1b: the canonical encoding and the hash chain.
-`docs/technical.md` §11 has the ordering and the reasoning for the split.
+> **Entry condition, verbatim from `docs/technical.md` §11: the app has been
+> opened three days running.** Not before.
 
-**Nothing blocks the first line of code.** The previous version of this file
-gated everything on a $99 purchase with an individual-verification wait, and on
-naming two habits. Both were wrong:
+**That condition is not met, and nothing in this repository says it is.** Week 1a
+ends with *"Install on the phone. Use it."* — that item is unticked, and no
+entry in `memory/decisions.md` records the app ever being on a phone. What has
+been demonstrated is a simulator install, which is a build check, not three days
+of use. So the honest next action is not code:
 
-1. **The paid Apple Developer account** blocks the app living on the phone
-   permanently, not writing code. A free profile expires after seven days, which
-   is fatal to a habit but not to a seven-day skeleton. Start the enrolment in
-   parallel; it blocks nothing until week 1a is installed to stay.
-2. **Which habits** was never a specification problem. There is no notification
-   any more, and `habitRenamed` is cosmetic and never affects the fold — so this
-   is by construction the cheapest thing in the project to change. **Settled on
-   2026-07-31:** four, seeded in the bundle with their names already set — Move,
-   Read, Build, Reflect, one per domain. `AppComposition.seededHabits`. The
-   placeholder *display names* `habit-a` and `habit-b` are gone; the opaque
-   *identifiers* `habit-a` through `habit-d` stay, deliberately, because a
-   `HabitID` is what `facts` carries into a digest — `memory/decisions.md`
-   2026-07-31. The settings sheet can rename, add and remove, so no name here
-   is load-bearing.
+1. **Put the app on the phone and open it for three days.** A free provisioning
+   profile is acceptable for this — it expires after seven days, which is fatal
+   to a habit but not to a three-day entry condition.
+2. **Start the paid Apple Developer enrolment in parallel** if it has not been
+   started. Individual verification takes days and it blocks nothing until the
+   app goes on the phone to stay.
+
+If week 1b is started before the app is in daily use, the ordering rule in
+`docs/technical.md` §11 — *the daily loop must be in daily use before anything
+cryptographic is built* — has been broken, and the thing that keeps the project
+alive was skipped for the thing that is more interesting to build. That is the
+whole reason the split exists.
+
+**The one-time `reproject` hatch is still open** and is what makes waiting safe:
+the week-1a log can be replayed once into a freshly chained log. It closes the
+moment anything is signed, which cannot happen before week 3.
+
+## Outstanding, and not blocking week 1b
+
+- **The paid account and a TestFlight path**, before the app lives on the phone
+  permanently. Then the ninety-day rule: upload every quarter, and **update in
+  place — never delete and reinstall**, because deleting destroys the container
+  and the whole log.
+- **Measurements owed** under the standing evidence rules: cold launch to first
+  frame, and full replay time, both on the actual phone. 400 ms and 250 ms are
+  proposals and must not be written into a test as fact.
+- **`PROJECT_CONSTITUTION.md` §14 is still unresolved** — wallet recovery versus
+  the invisibility rule. It must be resolved before contract work begins, and it
+  is a design blocker, not a product one. §3 settles that the chain ships; what
+  ADR 0003 §2.5 refuses is its specific recovery ceremony.
+- **The known-broken and known-untested list** is `memory/known-bugs.md`. Read
+  it before touching `SettingsView` or `TodayView`.
 
 ## The standing constraint on everything
 
@@ -74,11 +134,14 @@ correct-but-requires-a-rewrite.
 
 ## Do not
 
-- **Do not write another document.** See the freeze at the top. The next
-  artifact this project needs is a passing test, not a better explanation.
-- Do not start the chain limb. It is now **refused, not deferred**, until a
-  dated entry in `memory/decisions.md` overturns the invisibility non-goal —
-  ADR 0003 §2.5 explains why the limb cannot satisfy it as designed.
+- **Do not rebuild anything.** `PROJECT_CONSTITUTION.md` §5: no rewrites, no
+  restarts, no new repositories. If a document tells you nothing has been built,
+  the document is wrong — run `swift test` and fix the document.
+- **Do not write another governance document.** Governance is frozen —
+  `PROJECT_CONSTITUTION.md` §11. Correcting a false sentence is not a new
+  document; explaining an existing decision again is.
+- Do not start the chain limb before §14 is resolved in writing, with a date, in
+  `memory/decisions.md`.
 - Do not add a fifth habit slot, a second tab, or a settings option.
 - Do not add a surface. The v1 budget off the launch path is three, counted in
   `docs/product.md`. A fourth means editing that list first.

@@ -1,7 +1,9 @@
 # Testing rules
 
-Swift Testing (`@Test`, `#expect`). Around 80% of all tests live in
-`CompassDomainTests`, are pure, and run in milliseconds. Write these:
+Swift Testing (`@Test`, `#expect`). `CompassDomainTests` is the largest suite and
+the only one with no filesystem in it — **85 of 218 tests, counted 2026-08-01** —
+and it runs in milliseconds. A new test goes there unless it cannot. ("Around
+80%" stood here until someone counted; it was never true.) Write these:
 
 - **Day and streak arithmetic, exhaustively.** 23:59 and 00:30 check-ins; the
   04:00 cutoff; DST both directions; travel Surabaya to anywhere and back; leap

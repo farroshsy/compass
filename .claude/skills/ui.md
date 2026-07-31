@@ -1,7 +1,10 @@
 # UI rules
 
-The whole product is: open, tap two checkboxes, close, under three seconds.
+The whole product is: open, tap four checkboxes, close, under three seconds.
 Anything that adds a step to that is wrong regardless of what it enables.
+
+Four, because four is what installs — `AppComposition.seededHabits`, and
+`Projection.habitCap` is 4. This said "two" until 2026-08-01.
 
 - One screen **on the launch path**. No `TabView`. No `NavigationStack` on the
   launch path. Everything else is a `.sheet` or `.fullScreenCover` presented
@@ -31,9 +34,15 @@ Anything that adds a step to that is wrong regardless of what it enables.
 - No "+" button on Today. Adding, renaming and deleting habits live behind the
   settings glyph, which is deliberately hard to reach.
 - Each habit row gets a colour, from a four-entry palette because four is the
-  cap. Everything else is greyscale. Six of the eight field values are derived
-  arithmetic rather than the designer's eye, and all four rows ship on first
-  launch — `docs/open-questions.md` and `HabitTint`.
+  cap. Everything else is greyscale. **The palette is checked-row fields only,
+  so a fresh install is four greys, not four colours.** `HabitTint` carries
+  `field` and `fieldDark` and no unchecked value, and `HabitRow` fills an
+  unchecked row with `Color.primary.opacity(0.06)` — grey, no hue. Colour
+  appears on the check, and this was verified from a screenshot of a fresh
+  install, not from another document. Six of the eight field values are derived
+  arithmetic rather than the designer's eye, and nobody has yet looked at the
+  third and fourth as colours — `docs/open-questions.md` and `HabitTint` both
+  carry that open question and its falsifier.
 - Milestone certificate: fades up 12pt over 220ms. It does not pop, bounce, fly,
   or spin. Readable and dismissable by 300ms. No single animation over 300ms.
 - The certificate never waits for a network. It shows **"Sealed on this device"**
