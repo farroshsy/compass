@@ -222,9 +222,13 @@ point named rather than settled now.
 ## The share artifact names nobody
 
 **Raised:** 2026-07-31, by a design review of the certificate.
-**Status:** open. Blocks nothing in weeks 1–2. Should be answered before week 3
-builds `CertificateView`, because the answer changes what the certificate
-renders.
+**Status: RESOLVED, 2026-07-31 — option (b).** The decision and its reasoning are
+in `memory/decisions.md`, "the four habits, the sealed name, and one recorded
+deviation". It is not re-argued here; it is overturned in writing, with a date
+and a reason, or it stands.
+
+The question is left in this file rather than deleted, because the alternative it
+rejected is the part that stops it being re-raised.
 
 `docs/product.md` justifies the certificate's `ShareLink` on the grounds that a
 stranger — an employer, a coach — can verify a claim without trusting the app.
@@ -263,6 +267,26 @@ Owner: the human, per `PROJECT_CONSTITUTION.md` §6. Neither option overturns a
 non-goal — (b) adds a field, it does not add an account — so this needs a
 decision recorded in `memory/decisions.md`, not a non-goal overturn.
 
+### Decided — (b), 2026-07-31
+
+The owner chose (b). It ships as one optional text field in the settings sheet,
+empty by default, recorded as the event kind `subjectNamed` with payload
+`{"name":<string>}` — added additively per `docs/technical.md` §3, reusing a
+payload key that was already frozen, so nothing about the closed-payload rule or
+any existing kind's key order moves. It reaches the digest through the log, via
+`docs/achievement-protocol.md` §4's `witness.logHeads`, rather than through
+`facts`, because a digest field cannot be added additively and an event kind can.
+
+The reasoning, including why (a) was rejected while remaining true, is in
+`memory/decisions.md`. The claim the app is permitted to make is fixed there and
+is repeated in the sheet's own copy: **it proves the name was committed to at the
+time, not that the name is true.**
+
+What (b) costs, from the list above, is now paid: one field, one event kind, and
+a decision about what an empty name renders as — an empty name is no declaration
+at all, and it is also how a declaration is withdrawn. The remaining item, the
+line on the certificate, lands with `CertificateView` in week 3.
+
 ---
 
 ## The Today screen was built from the design, and three things were not
@@ -276,7 +300,16 @@ the 9pt/2pt spine, deep-field checked rows with a rounded-square mark, and the
 six Dynamic Type rules. Three points where the document could not be followed
 literally are recorded here rather than absorbed silently.
 
-### 1. The settings glyph is not on the screen
+### 1. The settings glyph is not on the screen — CLOSED, 2026-07-31
+
+**The falsifier below fired.** The settings sheet exists, so the glyph shipped
+with it, at the measured position, unchanged: SF Symbols `gearshape`, 17pt, 30%
+ink, a 44 x 44 target centred at (371, 128), overhanging the margin by 11pt. The
+geometry moved out of `TodayView`'s documentation and into `TodayMetrics`, where
+`TodayMetricsTests` asserts every number of it — so "unchanged" is now checkable
+rather than remembered. The original entry is kept below because it is the reason
+the position was not re-invented.
+
 
 The design adds one — SF Symbols `gearshape`, 17pt, 30% ink, a 44 x 44 target
 centred at (371, 128) in the 402 x 874 frame, overhanging the margin by 11pt so

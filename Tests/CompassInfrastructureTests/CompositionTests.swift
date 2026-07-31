@@ -15,7 +15,7 @@ import Testing
 @Suite("Composition — the launch path, where App/ used to hide")
 struct CompositionTests {
 
-    @Test("A first launch seeds the two habits and opens the store")
+    @Test("A first launch seeds the four habits and opens the store")
     func firstLaunchSeeds() throws {
         try withTemporaryStore { layout in
             let composed = AppComposition.compose(
@@ -32,7 +32,58 @@ struct CompositionTests {
             // Habits are created the same way everything else happens — as
             // events in the log — so the seed is on disk, not in memory.
             let onDisk = try JournalReader(url: layout.events).read()
-            #expect(onDisk.events.count == 2)
+            #expect(onDisk.events.count == AppComposition.seededHabits.count)
+        }
+    }
+
+    /// The owner chose these on 2026-07-31, one per domain — health, learning,
+    /// deep work, reflection — and the order is the order they appear on the
+    /// screen. `memory/decisions.md`.
+    ///
+    /// Asserted literally, and against `activeHabits` rather than against the
+    /// seed constant, because a test written against the constant follows the
+    /// constant wherever it goes and therefore asserts nothing about what the
+    /// user opens the app to.
+    @Test("The seeded habits are Move, Read, Build, Reflect, in that order")
+    func theSeededHabits() throws {
+        try withTemporaryStore { layout in
+            let composed = AppComposition.compose(
+                storeURL: layout.storeURL, clock: frozenClock()
+            )
+            let habits = project(composed.events).activeHabits
+            #expect(habits.map(\.name) == ["Move", "Read", "Build", "Reflect"])
+        }
+    }
+
+    /// `docs/product.md` caps habits at four and this seeds at the cap, which is
+    /// only safe because `TodayMetricsTests` proves four rows still fit at AX5.
+    /// If the cap ever drops, first launch would open over-full and the settings
+    /// sheet would refuse to add anything.
+    @Test("The seed sits exactly at the cap, and does not exceed it")
+    func theSeedFitsTheCap() throws {
+        #expect(AppComposition.seededHabits.count == Projection.habitCap)
+
+        try withTemporaryStore { layout in
+            let composed = AppComposition.compose(
+                storeURL: layout.storeURL, clock: frozenClock()
+            )
+            #expect(!project(composed.events).mayCreateHabit)
+        }
+    }
+
+    /// `docs/achievement-protocol.md` §3.4: a `HabitID` is what `facts` carries
+    /// into a signed, anchored, shareable record, and there is no redaction path
+    /// and can never be one. The display name must not be recoverable from it.
+    ///
+    /// The cheap mistake this forbids is seeding `HabitID("move")` because it
+    /// reads well in the log.
+    @Test("The seeded identifiers carry no part of the seeded names")
+    func theSeededIdentifiersAreOpaque() {
+        for habit in AppComposition.seededHabits {
+            #expect(
+                !habit.id.rawValue.lowercased().contains(habit.name.lowercased()),
+                "\(habit.id) leaks \(habit.name) into everything that is ever digested"
+            )
         }
     }
 
@@ -44,7 +95,7 @@ struct CompositionTests {
 
             #expect(second.events.count == AppComposition.seededHabits.count)
             let onDisk = try JournalReader(url: layout.events).read()
-            #expect(onDisk.events.count == 2)
+            #expect(onDisk.events.count == AppComposition.seededHabits.count)
         }
     }
 
@@ -97,13 +148,14 @@ struct CompositionTests {
             try first.recorder.record(
                 kind: .checkedIn, day: day("2026-07-31"), source: .tap, payload: .habit(habitA)
             )
-            // Two seeded habits at lamport 1 and 2, one check-in at 3.
+            // Four seeded habits at lamport 1 to 4, one check-in at 5.
+            let afterSeed = AppComposition.seededHabits.count
             let writer = try WriterIdentity(layout: layout).load()
             let onDisk = try JournalReader(url: layout.events).read()
-            #expect(onDisk.highWaterMarks[writer] == 3)
+            #expect(onDisk.highWaterMarks[writer] == afterSeed + 1)
 
             let second = AppComposition.compose(storeURL: layout.storeURL, clock: frozenClock())
-            #expect(second.events.count == 3)
+            #expect(second.events.count == afterSeed + 1)
 
             // Emptying the file *after* composing is the probe: from here, any
             // read of the log answers "this writer has never written", so only a
@@ -117,7 +169,7 @@ struct CompositionTests {
             let event = try second.recorder.record(
                 kind: .checkedIn, day: day("2026-08-01"), source: .tap, payload: .habit(habitA)
             )
-            #expect(event.lamport == 4)
+            #expect(event.lamport == afterSeed + 2)
         }
     }
 
@@ -184,7 +236,7 @@ struct CompositionTests {
 
             #expect(appEvent.device != widgetEvent.device)
             // The widget did not re-seed: the habits already exist in the log.
-            #expect(widget.events.count == 2)
+            #expect(widget.events.count == AppComposition.seededHabits.count)
         }
     }
 

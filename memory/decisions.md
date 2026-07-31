@@ -390,3 +390,129 @@ The alternative was keeping the root where a reader expects it and leaving the
 lines that can be wrong where no test can see them.
 
 Accepted by the human on 2026-07-31.
+
+---
+
+## 2026-07-31 — the four habits, the sealed name, and one recorded deviation
+
+Three decisions taken by the owner on the same day, recorded together because
+each was a choice a future session would otherwise re-argue. All three landed
+with the code in the same change.
+
+### The four seeded habits: Move, Read, Build, Reflect
+
+The placeholders `habit-a` and `habit-b` are gone. `memory/current-focus.md`
+called naming them "by construction the cheapest thing in the project to change"
+and told a session to ship the placeholders rather than block on the question;
+this is that question answered, not overturned.
+
+**One per domain, and the domains are the point:** health, learning, deep work,
+reflection. They are chosen to be mutually exclusive and jointly close to
+exhaustive for one person's day, so that no day's effort has nowhere to land and
+no two rows compete for the same tap.
+
+**Relationship and character are folded into Reflect rather than becoming two
+more booleans.** They are real and they were considered. They lose to the cap:
+`docs/product.md` makes four a hard cap on the grounds that the one-handed
+bottom-anchored layout stops holding past four rows, "at which point the
+three-second promise quietly becomes false" — and objective 1 outranks
+everything. A sixth row would be a better taxonomy attached to a worse loop.
+Reflect is where they are recorded, in the person's own head, which is where the
+app has always kept everything that is not a boolean: there are no notes, no
+tags and no moods here by permanent non-goal.
+
+**This seeds at the cap, deliberately.** That is only safe because the AX5
+finding holds: four rows still fit at accessibility 5 with 137 points to spare,
+and `TodayMetricsTests` pins that number so a future change to any constant on
+the screen has to re-derive it. It also means first launch opens with no free
+slot — the settings sheet refuses a fifth until one is removed, and says so.
+
+**The identifiers stay opaque** — `habit-a` through `habit-d`, carrying no part
+of the names. `docs/achievement-protocol.md` §3.4 keeps display names out of
+anything digested because there is no redaction path and can never be one, and a
+`HabitID` is precisely what `facts` carries into a signed, anchored record. An ID
+of `"move"` would have put the name inside the digest for the sake of a log that
+reads nicely. A test asserts no seed's ID contains its name.
+
+### The share subject: option (b), an optional self-declared name
+
+`docs/open-questions.md` asked what the certificate is a record *of*: the
+exported card states that a device recorded 100 consecutive days, and never
+whose device. Two candidate answers were written down. **(b) is chosen.**
+
+What ships: one optional text field in the settings sheet, empty by default. No
+account, no sign-in, no server, no verification of any kind. It is recorded as a
+new event kind, `subjectNamed`, payload `{"name":<string>}`.
+
+**Why (b) over (a).** (a) — accept it, the record is meaningful only when handed
+over in context — costs nothing and is honest, and it remains true: you send the
+certificate yourself, in a conversation where you are already identified. It was
+rejected because it leaves the artifact unable to say anything at all about its
+subject even when the holder wants it to, and the thing that would fix that is
+one string. (b) is strictly stronger than (a) and weaker than an identity claim,
+which is the correct position given that the identity claim is unavailable.
+
+**The claim is deliberately weak, and the interface must state it weakly.**
+Nothing proves the name is true; `docs/product.md` makes the second party that
+could check it a permanent non-goal, and that is not being overturned here.
+What is proven is narrower and real: the declaration is an event in the log, and
+`docs/achievement-protocol.md` §4's `witness.logHeads` commits to the whole
+history as of detection — so a name declared before a record is sealed cannot be
+restated afterwards without breaking that seal. **It proves the name was
+committed to at the time, never that it is true.** The settings sheet says
+exactly that, in those terms.
+
+**Why it is a kind and not a field in `facts`.** `facts` is inside the canonical
+bytes, and a digested field cannot be added additively — the same argument that
+kept `source_backfill` in the digest keeps this out of it. `EventKind` is a
+`RawRepresentable` string precisely so a kind can be added later without a format
+change (`docs/technical.md` §3), and this is the first use of that affordance.
+It costs nothing: `subjectNamed` reuses `name`, a key `payload` had already
+frozen, so the closed-payload rule does not move, no existing kind's key order
+moves, and a build predating the kind decodes the line, ignores it in the fold,
+and re-emits it unchanged.
+
+Withdrawing a name is declaring an empty one, appended. **Nothing is deleted**,
+and a record sealed while a name stood keeps that name.
+
+No non-goal is overturned by this. (b) adds a field; it does not add an account.
+
+### The unchecked mark is 45% ink, not 25%, and that is a deviation
+
+Recorded because the design document explicitly asked for it to be, and because
+an unrecorded deviation is one a future session "fixes" back.
+
+The unchecked habit mark is a rounded-square stroke at **45% ink**, not the
+`opacity(0.25)` the design document cites as the UI rule. The grounds are
+measured contrast: **1.82:1 at 25%, 3.3:1 at 45%.** The lower value is not
+legible as a control, and the mark is the only thing on an unchecked row that
+says the row is a thing you press.
+
+Two honest notes on the citation. `.claude/skills/ui.md` **as it now stands
+states no opacity for the mark at all**, so the deviation is from the value the
+design document quotes, not from a line a reader will find in the skills file
+today. And the accompanying stroke widths — 1.7 at 20pt, 2.4 at the 48pt drawn
+at AX5 — are deliberately not proportional: the mark grows 2.4x and the stroke
+1.4x, because a proportionally scaled stroke on a 48pt square reads as a filled
+square, which is the checked state.
+
+`Sources/CompassUI/TodayMetrics.swift` carries the numbers and the reasoning at
+the site.
+
+### What landed with these decisions
+
+Habit management in the settings sheet — add one, remove one — plus the settings
+glyph the design specified and an earlier session deliberately held back because
+the sheet did not exist yet. **Removing a habit appends `habitArchived` and never
+deletes anything**, the habit keeps every day it recorded, and the four-habit cap
+counts active habits only. The sheet says both of those out loud rather than
+leaving them to the documentation.
+
+Habit rows are now ordered by **creation order** rather than by identifier byte
+order. That was invisible while every ID was a seed constant and became wrong the
+moment the sheet could mint one: identifiers are opaque on purpose, so ordering
+by them would have put a habit added this afternoon wherever random hex landed.
+The register keeps the earliest creation, per habit, so it is order-independent
+like every other register in the fold.
+
+Accepted by the human on 2026-07-31.

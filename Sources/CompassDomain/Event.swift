@@ -266,8 +266,14 @@ public struct EventOrder: Hashable, Comparable, Sendable {
 /// checkInRevoked     {"habitID":<string>}
 /// achievementAwarded {"achievementID":<string>}
 /// achievementRevoked {"achievementID":<string>,"reason":<string>}
+/// subjectNamed       {"name":<string>}
 /// ```
 /// A kind with no fields of its own emits `{}`.
+///
+/// ``EventKind/subjectNamed`` was added on 2026-07-31 and is the cheapest
+/// possible case of that rule: it reuses ``name``, a key this structure already
+/// froze, so the closed set does not change, no existing kind's key order moves,
+/// and a build predating the kind still decodes the payload.
 public struct EventPayload: Hashable, Sendable, Codable {
     public let habitID: HabitID?
     public let name: String?
@@ -302,6 +308,13 @@ public struct EventPayload: Hashable, Sendable, Codable {
 
     public static func achievement(_ id: AchievementID, reason: String) -> EventPayload {
         EventPayload(achievementID: id, reason: reason)
+    }
+
+    /// The payload of a ``EventKind/subjectNamed``: `{"name":<string>}`, and
+    /// nothing else. An empty string is legal and is how a declaration is
+    /// withdrawn — see ``EventKind/subjectNamed``.
+    public static func subject(named name: String) -> EventPayload {
+        EventPayload(name: name)
     }
 
     // MARK: Codable — closed, so an unknown key is a decode failure

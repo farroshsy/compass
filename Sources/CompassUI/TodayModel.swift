@@ -27,6 +27,12 @@ public final class TodayModel {
     /// The fold of the log. Every read on this screen goes through it.
     public private(set) var projection: Projection
 
+    /// The declared subject of the record — the optional, self-declared,
+    /// unverified name from the settings sheet. A second, separate fold over the
+    /// same log; see ``CompassDomain/SubjectName`` for why it is not inside
+    /// ``projection``.
+    public private(set) var subject: SubjectName
+
     /// The civil day the screen is about, with the 04:00 boundary already
     /// applied. Refreshed when the app becomes active, so a phone left open
     /// overnight does not keep tapping into yesterday.
@@ -69,6 +75,7 @@ public final class TodayModel {
         isStoreAvailable: Bool = true
     ) {
         self.projection = project(events)
+        self.subject = declaredSubject(events)
         self.today = clock.today(cutoffHour: DayBoundary.cutoffHour)
         self.clock = clock
         self.recorder = recorder
@@ -97,10 +104,23 @@ public final class TodayModel {
 
     // MARK: Reading
 
-    /// At most four. The cap is enforced where habits are created, not here:
-    /// hiding a row would make its taps impossible while its data kept
+    /// At most four, oldest first. The cap is enforced where habits are created,
+    /// not here: hiding a row would make its taps impossible while its data kept
     /// accumulating. `docs/product.md`.
     public var habits: [HabitState] { projection.activeHabits }
+
+    /// The habits that have been removed from Today — **archived, never
+    /// deleted.** They keep every day they recorded, they are still in the log,
+    /// and they do not occupy one of the four slots.
+    public var removedHabits: [HabitState] { projection.archivedHabits }
+
+    /// Whether the settings sheet may add another habit. Four active is the cap;
+    /// removed ones do not count. `docs/product.md`.
+    public var mayAddHabit: Bool { projection.mayCreateHabit }
+
+    /// The declared name, or `""`. Never verified, and the interface must never
+    /// say or imply that it was.
+    public var declaredName: String { subject.value }
 
     /// The largest number on the screen. Never the streak — a number that
     /// resets to zero teaches starting over, which is the behaviour this
@@ -226,6 +246,87 @@ public final class TodayModel {
         // engine is week 3 (§11 build order). They attach here.
     }
 
+    // MARK: The settings sheet
+
+    /// Creates a habit. Returns `false` and writes nothing when the name is
+    /// blank, when four are already active, or when the write fails.
+    ///
+    /// The identifier is minted here, opaque, and **never derived from the
+    /// name.** `docs/achievement-protocol.md` §3.4: a `HabitID` is what `facts`
+    /// carries into a signed, anchored, shareable record, and there is no
+    /// redaction path and can never be one — so a habit called after a recovery
+    /// programme or a medical routine must not put that word inside the digest.
+    /// A random UUID cannot.
+    @discardableResult
+    public func addHabit(named rawName: String) -> Bool {
+        let name = rawName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { return false }
+
+        // The cap is enforced here, at the one place a habit can be created,
+        // rather than by hiding a row: a hidden row is a habit whose taps are
+        // impossible while its data keeps accumulating. `docs/product.md`.
+        guard projection.mayCreateHabit else { return false }
+
+        let id = HabitID(rawValue: "h-\(UUID().uuidString.lowercased())")
+        guard let event = append(kind: .habitCreated, payload: .habit(id, name: name)) else {
+            return false
+        }
+        projection.apply(event)
+        return true
+    }
+
+    /// Removes a habit from Today by appending a `habitArchived`.
+    ///
+    /// **It never deletes.** A habit dropped after sixty days keeps those sixty
+    /// days in the log, in ``projection``, and in every export — that is the
+    /// whole premise of an append-only record, and it is the same rule that
+    /// makes un-checking a day a `checkInRevoked` rather than a mutation. There
+    /// is no code path in this application that removes anything from the log,
+    /// and there must never be one.
+    @discardableResult
+    public func removeHabit(_ habit: HabitState) -> Bool {
+        guard let event = append(kind: .habitArchived, payload: .habit(habit.id)) else {
+            return false
+        }
+        projection.apply(event)
+        return true
+    }
+
+    /// Declares the optional, self-declared name for the record, or withdraws it
+    /// by passing an empty string. Returns `false` when nothing changed or the
+    /// write failed.
+    ///
+    /// It is an event, so it is in the log, so it is under
+    /// `witness.logHeads` in every achievement sealed afterwards — which is the
+    /// entire claim: **the name was committed to at the time.** It is not a
+    /// login, there is no account, no server sees it, and nothing verifies it.
+    /// Nothing in the interface may imply otherwise.
+    @discardableResult
+    public func declare(name rawName: String) -> Bool {
+        let name = rawName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard name != subject.value else { return false }
+        guard let event = append(kind: .subjectNamed, payload: .subject(named: name)) else {
+            return false
+        }
+        subject.apply(event)
+        return true
+    }
+
+    /// Records one event off the tap path, on the same terms as ``toggle``: the
+    /// day is refreshed first so one interaction uses one day, `source` is
+    /// absent because only a check-in has one, and **a failed write changes
+    /// nothing on screen** — no state that is not on disk.
+    private func append(kind: EventKind, payload: EventPayload) -> Event? {
+        refreshDay()
+        guard let event = try? recorder.record(
+            kind: kind, day: today, source: nil, payload: payload
+        ) else {
+            return nil
+        }
+        if isReplaying { appliedDuringReplay.append(event) }
+        return event
+    }
+
     // MARK: The launch path
 
     /// The full replay, run from a `.task` immediately after the first frame.
@@ -242,11 +343,14 @@ public final class TodayModel {
         guard let events = try? await source.replay() else { return }
 
         var replayed = project(events)
+        var replayedSubject = declaredSubject(events)
         let seen = Set(events.map(\.id))
         for event in appliedDuringReplay where !seen.contains(event.id) {
             replayed.apply(event)
+            replayedSubject.apply(event)
         }
         projection = replayed
+        subject = replayedSubject
     }
 
     /// Re-reads the civil day. Called when the view appears, whenever the app

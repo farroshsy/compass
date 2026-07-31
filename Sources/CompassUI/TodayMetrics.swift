@@ -1,3 +1,4 @@
+import CompassDomain
 import SwiftUI
 
 /// Every number on the Today screen, in one place, so that the screen and the
@@ -61,6 +62,48 @@ public enum TodayMetrics {
     /// needs it on the thing they tap.
     public static let headerClamp: DynamicTypeSize = .accessibility2
 
+    // MARK: The settings glyph
+
+    // SF Symbols `gearshape`, 17pt, 30% ink, a 44 x 44 hit target centred at
+    // (371, 128) in the 402 x 874 frame — top-right, on the number's cap line.
+    //
+    // The design records it as a decision taken on the user's behalf: an
+    // addition to a screen whose rule is that nothing may be added, "justified
+    // only because the sheet is already budgeted and otherwise unreachable". It
+    // was deliberately not built while the sheet did not exist, because a glyph
+    // that opens nothing is a control that lies. The sheet exists now, so it
+    // ships at the position that was measured rather than the one that looks
+    // right. `docs/open-questions.md`.
+
+    /// The glyph itself. Small on purpose: this is the deliberately hard-to-reach
+    /// entrance to the one surface off the launch path.
+    public static let settingsGlyphPointSize: CGFloat = 17
+
+    /// 30% ink. It must be legible and must not compete with the number.
+    public static let settingsGlyphInk: Double = 0.30
+
+    /// 44 x 44, the whole reason the glyph overhangs the margin: at 17pt the
+    /// symbol is nowhere near a thumb-sized target, so the target is grown
+    /// around it rather than the glyph being grown to meet it.
+    public static let settingsTarget: CGFloat = 44
+
+    /// How far the target overhangs the 20pt margin, so the **glyph's** trailing
+    /// edge lands on the margin line while the target still reaches 44.
+    public static let settingsOverhang: CGFloat = 11
+
+    /// The target's top edge, measured from the top of the header content.
+    /// Everything else about the position follows from this and the frame.
+    public static let settingsTopOffset: CGFloat = 16
+
+    /// The design's measured centre, derived rather than restated: 402 − 20
+    /// margin − 22 half-target + 11 overhang = 371.
+    public static let settingsCentreX =
+        frameWidth - horizontalMargin - settingsTarget / 2 + settingsOverhang
+
+    /// 62 safe area + 28 header inset + 16 offset + 22 half-target = 128.
+    public static let settingsCentreY =
+        safeAreaTop + headerTopInset + settingsTopOffset + settingsTarget / 2
+
     // MARK: The 28-dot spine
 
     /// How many days the spine shows. ``TodayModel/spineLength`` reads it from
@@ -82,7 +125,12 @@ public enum TodayMetrics {
     // MARK: Habit rows
 
     /// A hard cap, not a default. `docs/product.md`.
-    public static let habitCap = 4
+    ///
+    /// Read from Domain rather than restated here. The cap is a product rule
+    /// about how many habits exist, enforced where habits are created; this
+    /// target only has to fit them on the screen. Two constants would be two
+    /// things that can disagree.
+    public static let habitCap = Projection.habitCap
 
     public static let rowSpacing: CGFloat = 12
 
