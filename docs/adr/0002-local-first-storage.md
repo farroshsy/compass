@@ -239,3 +239,52 @@ concurrently fork the chain, and reconciling that requires consensus, which is
 precisely the coordination this design exists to avoid. Per-device chains, with
 the anchor covering the sorted set of heads, give the same guarantee with none
 of the coordination.
+
+---
+
+## Amendment — 2026-07-31: `content_hash` must cover the payload
+
+**Status:** Accepted. Applied to `docs/technical.md` §3 the same day.
+
+**Evidence** (per `PROJECT_CONSTITUTION.md` §12): a security issue was
+identified. This is the "security issue has been identified" limb, not the "it
+feels cleaner" non-limb.
+
+**The defect.** The canonical form frozen in `technical.md` §3 listed
+`v, id, device, lamport, kind, day, recordedAt, zoneOffset, source, prev` and
+nothing else. Every event kind carries a `habitID` or `achievementID`, and none
+of them were digested. Consequently `habitID` could be edited on any line
+without changing that event's `content_hash`, without breaking the `prev` chain,
+and without invalidating the `evidenceRoot` in `docs/achievement-protocol.md`
+§4. A hundred-day meditation streak could be restated as a hundred-day reading
+streak with every proof intact, including the OpenTimestamps anchor.
+
+`technical.md` L240 asserted "altering any earlier event changes every later
+`content_hash`". True of the nine listed fields; false of the field carrying the
+event's meaning.
+
+**Decision.** A REQUIRED `payload` object joins the canonical form, positioned
+between `source` and `prev`, with a frozen per-kind key order. Always present;
+`{}` when a kind has no fields of its own. `day` and `source` stay at the top
+level.
+
+**Consequences.** None negative, because the fix landed before any code existed
+and therefore before anything was signed — §11's escape hatch closes permanently
+at the first signature, and it was still open. Had this been found after week 4,
+the choice would have been between abandoning every existing proof and shipping
+a chain that does not bind what it claims to bind.
+
+**Alternatives rejected.**
+- *Hash the whole on-disk line.* Rejected: the line carries `extra`, which an
+  older build cannot hash, and key order on disk is not fixed.
+- *Add `habitID` as a top-level digested field instead of a nested object.*
+  Rejected: `achievementAwarded` and `achievementRevoked` carry different
+  identifiers, so a single top-level field would be either wrongly named or
+  absent for half the kinds, and absent-means-omitted would then make two
+  different events digest identically.
+- *Leave it and document the limitation.* Rejected: the guarantee is the product.
+
+**How this was found.** Seven parallel agents read the corpus and cross-checked
+it; the finding was then verified by reading the canonical form directly rather
+than trusting the audit summary. Both steps mattered — the audit also produced
+two claimed contradictions that did not survive that check.

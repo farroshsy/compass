@@ -227,8 +227,48 @@ this key order**, using the same escaping rules as
 ```
 {"v":1,"id":<string>,"device":<string>,"lamport":<int>,"kind":<string>,
  "day":<string>,"recordedAt":<int>,"zoneOffset":<int>,"source":<string>?,
- "prev":<base64>}
+ "payload":<object>,"prev":<base64>}
 ```
+
+**`payload` carries the kind-specific fields, and it is REQUIRED.** Always
+present, never omitted, never `null` — a kind with no fields of its own emits
+`"payload":{}`. Keys are written in exactly the order listed here, per kind, no
+whitespace:
+
+```
+habitCreated       {"habitID":<string>,"name":<string>}
+habitRenamed       {"habitID":<string>,"name":<string>}
+habitArchived      {"habitID":<string>}
+habitUnarchived    {"habitID":<string>}
+checkedIn          {"habitID":<string>}
+checkInRevoked     {"habitID":<string>}
+achievementAwarded {"achievementID":<string>}
+achievementRevoked {"achievementID":<string>,"reason":<string>}
+```
+
+`day` and `source` stay at the top level rather than moving inside `payload`.
+They are already digested where they are, and moving them would be a format
+change that buys nothing.
+
+Hashing `name` is safe and deliberate: a hash does not reveal it. This does not
+weaken `docs/achievement-protocol.md` §3.4, which keeps habit *names* out of the
+achievement `facts` because those are published in cleartext. A digest is not a
+disclosure.
+
+**Why `payload` exists — recorded 2026-07-31, before any code was written.**
+The first version of this section omitted it. Every field saying *which habit an
+event is about* was therefore outside the digest, so editing `habitID` on any
+line left its `content_hash` unchanged, left the `prev` chain intact, and left
+`docs/achievement-protocol.md` §4's `evidenceRoot` verifying. A hundred-day
+meditation streak could have been rewritten into a hundred-day reading streak
+with every proof still checking out, Bitcoin anchor included. The guarantee this
+entire corpus rests on — that a sealed record cannot be restated afterwards —
+did not hold.
+
+It was correctable only because nothing had been signed; §11's escape hatch
+closes permanently at the first signature. It is written down rather than
+quietly patched so that the next person tempted to trim the canonical form can
+see what trimming it cost the first time.
 
 Rules, all of which are frozen at the first write:
 
@@ -237,7 +277,11 @@ Rules, all of which are frozen at the first write:
 - Optional fields that are absent are **omitted entirely**, never emitted as
   `null`. In v1 only `source` is optional.
 - **`prev` participates.** That is what makes the chain a chain: altering any
-  earlier event changes every later `content_hash`.
+  earlier event changes that event's `content_hash` and therefore every later
+  one. This holds only for fields inside the canonical form — which, since
+  `payload` was added above, is now every field that changes what an event
+  means. Before that fix the sentence was false in exactly the way that
+  mattered.
 - **`extra` does not participate**, for the same reason it is excluded from the
   achievement digest in the protocol document: an old build cannot hash fields
   it has never seen. The consequence is identical and must be understood —

@@ -9,10 +9,17 @@ repository, this wins, and the other file is wrong and should be fixed.
 
 ## 1. What this project is
 
-Compass is a **personal daily-use application and the reference implementation
-of the Achievement Protocol.** Its purpose is to demonstrate modern software
+Compass is a **personal daily-use application and the only implementation of the
+Achievement Protocol.** Its purpose is to demonstrate modern software
 engineering through a complete vertical slice: product, protocol, cryptography,
 blockchain, verification, and client applications.
+
+"Only implementation" is deliberate, replacing an earlier "reference
+implementation". In standards work that phrase implies other implementations are
+expected, which `docs/product.md` bans outright — no standard, no SDK, no spec
+others implement, no platform. The protocol here is a constitution for this
+codebase and nothing more. Having a protocol is permitted; designing one for
+adopters is not.
 
 It is **not** a startup. It is not seeking users, revenue, funding, growth or
 product-market fit. Objections of the form *"you do not need this to ship"* are
@@ -36,6 +43,15 @@ Settled on 2026-07-31 and not to be reopened.
 mandatory deliverables. Their implementation order is determined by engineering
 dependencies, not by their relative importance.** None is optional, a stretch
 goal, or required to justify itself in product terms.
+
+**This does not conflict with the chain limb being "refused" elsewhere,** and an
+audit on 2026-07-31 read it as a contradiction when it is not. The two
+statements sit at different layers. This section fixes the *destination*: the
+chain ships. ADR 0001 L14, ADR 0003 §2.5 and `memory/decisions.md` refuse *one
+specific design* — ADR 0003's embedded-wallet recovery ceremony, because it is a
+seed phrase by another name and breaks a `product.md` non-goal. Build the
+blockchain; do not build it that way. §14 is the live decision, and it is a
+design blocker, not a product one.
 
 Its justification is recorded honestly and is sufficient: **it is a deliberate
 learning objective.** The documentation must say exactly that, and must never

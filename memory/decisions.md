@@ -280,3 +280,29 @@ and write Swift, because that is a DSL arriving by accident.
 confident earned its complexity — one event kind and one fold branch for an edge
 case that fires perhaps twice a year. Trigger: an eastward flight actually costs
 a day, or a rest day is genuinely wanted.
+
+---
+
+## 2026-07-31 — `content_hash` covers the payload
+
+The canonical form did not digest `habitID`. Fixed in `technical.md` §3, ADR
+0002 amended. Found before any code was written, so the §11 escape hatch was
+still open and the fix cost nothing. See ADR 0002's amendment for the full
+accounting.
+
+## 2026-07-31 — "only implementation", not "reference implementation"
+
+`PROJECT_CONSTITUTION.md` §1 said "reference implementation of the Achievement
+Protocol". In standards work that implies other implementations are expected,
+which `product.md` bans. Reworded to "the only implementation". No change of
+substance — the protocol remains a constitution for this codebase alone.
+
+## 2026-07-31 — the chain mandate and the refused wallet design are not in conflict
+
+An audit read `PROJECT_CONSTITUTION.md` §3 ("the blockchain is mandatory")
+against six files recording the chain limb as "refused" and called it a blocking
+contradiction. It is not. §3 fixes the destination; the refusal is of ADR 0003's
+specific embedded-wallet recovery ceremony, which breaks the invisibility
+non-goal. Build the chain, not that design. Recorded here so the next reader
+does not re-derive the alarm. The live decision remains §14 / ADR 0003 §2.5:
+invisible recovery, or overturn the non-goal in writing.
