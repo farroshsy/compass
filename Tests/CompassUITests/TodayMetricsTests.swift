@@ -25,8 +25,23 @@ struct TodayMetricsTests {
 
     @Test("Four habits fit at AX5 — the hard cap survives the worst case")
     func fourHabitsFitAtAX5() {
-        let spare = TodayMetrics.spareHeight(habitCount: 4, at: .accessibility5)
+        let spare = TodayMetrics.spareHeight(habitCount: TodayMetrics.habitCap, at: .accessibility5)
         #expect(spare > 0)
+    }
+
+    /// The cap is a product rule about how many habits may exist, enforced in
+    /// Domain where habits are created. This target only has to fit them on the
+    /// screen, so it reads the number rather than restating it — and the finding
+    /// above is about *the cap*, not about the number four in particular.
+    ///
+    /// Both halves are asserted. A test written only against the constant would
+    /// follow the constant wherever it was moved and assert nothing; a test
+    /// written only against the literal would not notice the layout budget and
+    /// the enforcement drifting apart.
+    @Test("The layout budget and the enforced cap are the same number")
+    func theCapIsOneNumber() {
+        #expect(TodayMetrics.habitCap == Projection.habitCap)
+        #expect(TodayMetrics.habitCap == 4)
     }
 
     /// The exact number, so that changing *any* constant on the screen forces
@@ -112,6 +127,66 @@ struct TodayMetricsTests {
         #expect(TodayMetrics.spineWidth() == 306)
         #expect(TodayMetrics.spineWidth() <= TodayMetrics.contentWidth)
         #expect(TodayMetrics.contentWidth == 362)
+    }
+
+    // MARK: The settings glyph
+
+    /// The design specifies it exactly: SF Symbols `gearshape`, 17pt, 30% ink,
+    /// a 44 x 44 target centred at (371, 128) in the 402 x 874 frame,
+    /// overhanging the margin by 11pt so the glyph's trailing edge lands on the
+    /// margin line and the target still reaches 44.
+    ///
+    /// It was held back while the settings sheet did not exist — a glyph that
+    /// opens nothing is a control that lies — and `docs/open-questions.md`
+    /// records the geometry with the falsifier "the settings sheet exists. Then
+    /// the glyph ships with it, at that position, unchanged." This is that
+    /// position, asserted, so "unchanged" is checkable rather than remembered.
+    @Test("The settings glyph sits where the design measured it")
+    func theSettingsGlyphGeometry() {
+        #expect(TodayMetrics.settingsGlyphPointSize == 17)
+        #expect(TodayMetrics.settingsGlyphInk == 0.30)
+        #expect(TodayMetrics.settingsTarget == 44)
+        #expect(TodayMetrics.settingsOverhang == 11)
+
+        #expect(TodayMetrics.settingsCentreX == 371)
+        #expect(TodayMetrics.settingsCentreY == 128)
+    }
+
+    /// The target is the point of the overhang, and it is the thing a 17pt glyph
+    /// cannot supply on its own. Apple's minimum is 44 x 44 and this is the
+    /// smallest, furthest-away control in the app, so it has the least room to
+    /// be wrong.
+    @Test("The glyph is small, the target is not, and the target stays on screen")
+    func theTargetIsBiggerThanTheGlyph() {
+        #expect(TodayMetrics.settingsTarget >= 44)
+        #expect(TodayMetrics.settingsGlyphPointSize < TodayMetrics.settingsTarget)
+
+        // The glyph's trailing edge lands on the margin line: 371 + 22 − 11 = 382,
+        // which is 402 − 20.
+        let glyphTrailingEdge =
+            TodayMetrics.settingsCentreX + TodayMetrics.settingsTarget / 2
+            - TodayMetrics.settingsOverhang
+        #expect(glyphTrailingEdge == TodayMetrics.frameWidth - TodayMetrics.horizontalMargin)
+
+        // And the target itself, overhang included, is still inside the frame.
+        #expect(
+            TodayMetrics.settingsCentreX + TodayMetrics.settingsTarget / 2
+                <= TodayMetrics.frameWidth
+        )
+    }
+
+    /// It sits on the number's cap line — beside the number, never below the
+    /// spine, and never far enough down to be in the thumb arc the rows own.
+    @Test("The glyph is inside the header, not over the rows")
+    func theGlyphStaysInTheHeader() {
+        let headerTop = TodayMetrics.safeAreaTop + TodayMetrics.headerTopInset
+        let targetBottom = TodayMetrics.settingsCentreY + TodayMetrics.settingsTarget / 2
+
+        #expect(TodayMetrics.settingsCentreY > headerTop)
+        #expect(
+            targetBottom
+                <= headerTop + TodayMetrics.headerHeight(at: .large, captionLines: 1)
+        )
     }
 
     // MARK: The row

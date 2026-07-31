@@ -113,8 +113,15 @@ struct SeededGenerator: RandomNumberGenerator {
 }
 
 /// A canonical mixed corpus: two habits, two writers, creations, renames,
-/// archival, check-ins, revocations, a re-check, and two achievement events that
-/// the v1 fold must ignore.
+/// archival, check-ins, revocations, a re-check, two achievement events that the
+/// v1 fold must ignore, and two `subjectNamed` declarations it must ignore for
+/// the same reason.
+///
+/// The declarations are in here rather than only in their own suite so that
+/// every determinism test — shard invariance, shuffle invariance, incremental
+/// equals full replay, idempotence — runs over a log that contains a kind
+/// `Projection` does not fold. That is the additive claim, exercised rather than
+/// asserted.
 func corpus() -> [Event] {
     var events: [Event] = []
     var lamport = 0
@@ -169,6 +176,11 @@ func corpus() -> [Event] {
                 reason: "a day it depended on was edited"
             )
         )
+    )
+
+    events.append(event(.subjectNamed, lamport: next(), payload: .subject(named: "Farros")))
+    events.append(
+        event(.subjectNamed, lamport: next(), payload: .subject(named: "Farros Hilmi Syafei"))
     )
 
     return events

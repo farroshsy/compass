@@ -81,6 +81,39 @@ public struct EventKind: StringBacked {
     public static let checkInRevoked = EventKind(rawValue: "checkInRevoked")
     public static let achievementAwarded = EventKind(rawValue: "achievementAwarded")
     public static let achievementRevoked = EventKind(rawValue: "achievementRevoked")
+
+    /// The record's declared subject: an **optional, self-declared, unverified**
+    /// name for the person the record is about. Payload `{"name":<string>}` —
+    /// one key, from the closed set `payload` already has, so nothing about
+    /// `docs/technical.md` §3's closed-payload rule changes.
+    ///
+    /// **Added 2026-07-31, additively, and this is the mechanism §3 describes.**
+    /// "`EventKind` is a `RawRepresentable` string precisely so a kind can be
+    /// added later without a format change. That is the stated reason it is a
+    /// string." A build that predates this kind decodes the line, ignores it in
+    /// the fold, and re-emits it unchanged. The decision is recorded in
+    /// `memory/decisions.md`; it is option (b) of the share-subject question in
+    /// `docs/open-questions.md`.
+    ///
+    /// **What it does and does not prove.** `docs/product.md` bans accounts,
+    /// sign-in and any second party, so nothing can verify that the name is
+    /// true, and the app must never imply otherwise. What it does buy is
+    /// narrower and real: the declaration is an event in the log, and
+    /// `docs/achievement-protocol.md` §4 has `witness.logHeads` commit to the
+    /// whole history as of detection — so a name declared before an achievement
+    /// is sealed cannot be restated afterwards without breaking that seal. It
+    /// proves the name was committed to at the time, never that it is true.
+    ///
+    /// It is deliberately **not** a field in `facts`. `facts` is inside the
+    /// canonical bytes, and §3.4 fixes that shape; a digest field cannot be
+    /// added additively, whereas a kind can. Reaching the digest through the log
+    /// costs nothing and breaks nothing.
+    ///
+    /// An empty `name` is meaningful and is how a declaration is withdrawn: the
+    /// declaration is superseded going forward, and — like everything else here
+    /// — **nothing is deleted.** Both events stay in the log, and a record
+    /// sealed while a name stood keeps that name.
+    public static let subjectNamed = EventKind(rawValue: "subjectNamed")
 }
 
 /// Deterministic: `"<ruleID>@<earnedOn>"`, never a UUID.

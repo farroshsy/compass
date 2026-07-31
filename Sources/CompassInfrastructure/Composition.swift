@@ -37,7 +37,7 @@ import Foundation
 /// is still done in exactly one file.
 public enum AppComposition {
 
-    /// The two habits, **seeded with their names already set**, so first launch
+    /// The four habits, **seeded with their names already set**, so first launch
     /// opens directly on Today with the rows there. No naming screen, no
     /// keyboard, no permission prompt, nothing between install and the first
     /// tap. `docs/product.md`, `.claude/skills/ui.md`.
@@ -46,10 +46,28 @@ public enum AppComposition {
     /// can fail to load is a first launch that can fail, and renaming is a
     /// cosmetic event by construction (`habitRenamed` never affects the fold),
     /// so the names are the cheapest thing in the project to change.
-    /// `memory/next-tasks.md` names them until they are named for real.
+    ///
+    /// **Move, Read, Build, Reflect — chosen by the owner on 2026-07-31**, one
+    /// per domain: health, learning, deep work, reflection. Relationship and
+    /// character are folded into Reflect rather than becoming two more booleans,
+    /// because `docs/product.md` caps this at four and a fifth row makes the
+    /// three-second promise false. `memory/decisions.md` has the reasoning.
+    ///
+    /// **This seeds at the cap.** `TodayMetricsTests` is what makes that safe:
+    /// four rows still fit at AX5, with 137 points to spare.
+    ///
+    /// The identifiers stay opaque and carry no part of the names.
+    /// `docs/achievement-protocol.md` §3.4 keeps display names out of anything
+    /// digested, and a `HabitID` is exactly what `facts` carries — so an ID of
+    /// `"move"` would put the name inside a signed, anchored record with no
+    /// redaction path, which is the failure that section exists to prevent.
+    /// Their byte order is also their creation order here, which is the order
+    /// they appear on screen.
     public static let seededHabits: [(id: HabitID, name: String)] = [
-        (HabitID(rawValue: "habit-a"), "habit-a"),
-        (HabitID(rawValue: "habit-b"), "habit-b"),
+        (HabitID(rawValue: "habit-a"), "Move"),
+        (HabitID(rawValue: "habit-b"), "Read"),
+        (HabitID(rawValue: "habit-c"), "Build"),
+        (HabitID(rawValue: "habit-d"), "Reflect"),
     ]
 
     /// Week 1a's base URL: the app's own Documents directory.

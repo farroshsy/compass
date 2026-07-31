@@ -101,6 +101,21 @@ final class FakeRecorder: EventRecorder {
         state.withLock { $0.fails = fails }
     }
 
+    /// A recorder that resumes the sequence an existing log already used, the
+    /// way the real journal does from its high-water mark.
+    ///
+    /// It matters for more than tidiness: `lamport` is what orders events, and
+    /// since habit rows are ordered by the order of their creation, a recorder
+    /// that restarted at 1 would make a habit added now sort *before* the ones
+    /// already on screen — a fixture artefact that would hide the behaviour
+    /// under test.
+    init(continuing events: [Event], fails: Bool = false) {
+        state.withLock {
+            $0.fails = fails
+            $0.nextLamport = (events.map(\.lamport).max() ?? 0) + 1
+        }
+    }
+
     var recorded: [Event] { state.withLock { $0.recorded } }
     var last: Event? { state.withLock { $0.recorded.last } }
 
@@ -129,16 +144,61 @@ final class FakeRecorder: EventRecorder {
 }
 
 /// A replay that returns a fixed log, or throws — the store that is not there.
+///
+/// With a ``ReplayGate`` it can also be held open, which is the only way to
+/// observe what happens to an event recorded *while* a replay is in flight.
 struct FakeSource: EventSource {
 
     struct Failure: Error {}
 
     var events: [Event] = []
     var fails = false
+    var gate: ReplayGate?
 
     func replay() async throws -> [Event] {
+        await gate?.enter()
         if fails { throw Failure() }
         return events
+    }
+}
+
+/// A replay suspended on purpose.
+///
+/// `TodayModel.reconcile()` says the replay wins over whatever the first frame
+/// rendered, "the one thing the replay cannot win over is an event appended
+/// while it was in flight". Every fold the model keeps has to honour that, and a
+/// fold added later is exactly the one that gets forgotten — so the window has
+/// to be openable by a test rather than argued about.
+@MainActor
+final class ReplayGate {
+
+    private var entered = false
+    private var isOpen = false
+    private var waitingForOpen: [CheckedContinuation<Void, Never>] = []
+    private var waitingForEntry: [CheckedContinuation<Void, Never>] = []
+
+    /// Called from inside the replay: announces that it has started, then
+    /// suspends until ``open()``.
+    func enter() async {
+        entered = true
+        for waiter in waitingForEntry { waiter.resume() }
+        waitingForEntry.removeAll()
+
+        guard !isOpen else { return }
+        await withCheckedContinuation { waitingForOpen.append($0) }
+    }
+
+    /// Returns once the replay is suspended inside ``enter()``.
+    func waitUntilEntered() async {
+        guard !entered else { return }
+        await withCheckedContinuation { waitingForEntry.append($0) }
+    }
+
+    /// Lets the replay finish.
+    func open() {
+        isOpen = true
+        for waiter in waitingForOpen { waiter.resume() }
+        waitingForOpen.removeAll()
     }
 }
 
@@ -154,4 +214,17 @@ func created(_ habit: HabitID, name: String, lamport: Int) -> Event {
         zoneOffset: surabayaOffsetSeconds / 60,
         payload: .habit(habit, name: name)
     )
+}
+
+/// The bundle seed, as the composition root writes it: four habits at the cap,
+/// in the order the owner chose them on 2026-07-31.
+///
+/// Written out here rather than imported from `AppComposition`, because
+/// `CompassUITests` does not depend on `CompassInfrastructure` and should not —
+/// what the sheet does with four habits is not a fact about the composition root.
+func seededFour() -> [Event] {
+    let names = ["Move", "Read", "Build", "Reflect"]
+    return names.enumerated().map { index, name in
+        created(HabitID(rawValue: "habit-\(index)"), name: name, lamport: index + 1)
+    }
 }
