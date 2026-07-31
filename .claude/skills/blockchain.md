@@ -7,8 +7,18 @@ is in v1. If you are here before the app is in daily use, stop.
 the `docs/product.md` invisibility non-goal.** ADR 0003 §2.5 establishes that
 this limb cannot satisfy that rule — the recovery ceremony is a seed phrase by
 another name, and passkeys need a hosted `apple-app-site-association` file that
-the architecture rules forbid. Until someone accepts that cost in writing, this
-limb is refused, not deferred.
+the architecture rules forbid. Until someone accepts that cost in writing, **that
+recovery ceremony** is refused, not deferred.
+
+**What is refused is that design, not the subsystem.**
+`PROJECT_CONSTITUTION.md` §3 makes the blockchain a mandatory deliverable —
+settled 2026-07-31, not to be reopened — and §14 records this as a live *design*
+blocker to resolve before contract work, by either designing a genuinely
+invisible recovery path or overturning the non-goal in writing with the cost
+stated. Choosing neither and building anyway is not available; neither is
+choosing neither and never building. This paragraph read "this limb is refused"
+until 2026-08-01, which a session could take as permission to drop it. The
+constitution wins.
 
 - The chain is a publication, not the system of record. The local sealed log is
   the record. Removing the chain layer must lose no user data and no verifiable

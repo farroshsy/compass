@@ -155,8 +155,24 @@ struct SettingsEdits {
     /// It is the same rule ``remove(_:from:)`` already keeps in the other
     /// direction: **abandoning a field is not confirming it.** Dismissal is
     /// ambiguous, and where it is ambiguous this sheet does the reversible thing.
-    /// Adding is one visible, enabled tap away on the same row, and the text is
-    /// still there until the sheet closes.
+    /// The text stays in the field until the sheet closes.
+    ///
+    /// **What the consolation actually is — and on a default install it is not a
+    /// tap.** This comment used to end "Adding is one visible, enabled tap away
+    /// on the same row." That is false on the install that ships. The bundle
+    /// seeds four habits and ``CompassDomain/Projection/habitCap`` is 4, so a
+    /// fresh install sits *at* the cap: ``canAdd(in:)`` requires
+    /// ``TodayModel/mayAddHabit``, which is false there, so the Add button is
+    /// **disabled** and a typed name cannot be committed at all until a habit is
+    /// removed. The footer says that out loud —
+    /// ``SettingsCopy/addFooterAtCap`` — rather than leaving a dead button to
+    /// explain itself.
+    ///
+    /// This does not weaken the decision; it is the same argument one step
+    /// harder. Below the cap, Add is a visible enabled tap on this row, so
+    /// refusing to sweep the field costs the user one tap. At the cap, sweeping
+    /// it would be strictly worse: it would have to fail silently, or spend a
+    /// slot nobody asked for.
     mutating func commitAll(into model: TodayModel) {
         // Active habits only, which is now exactly right: an edit for a habit
         // removed mid-session was dropped by ``remove(_:from:)`` when the row

@@ -33,7 +33,13 @@ let package = Package(
         .target(name: "CompassInfrastructure", dependencies: ["CompassDomain"]),
         .target(name: "CompassUI", dependencies: ["CompassApplication", "CompassDomain"]),
 
-        // ~80% of all tests. Pure. Milliseconds.
+        // The largest suite, and the only one that is pure with no filesystem at
+        // all. Milliseconds. **Counted on 2026-08-01: 85 of 218 tests, 39%.**
+        // This comment said "~80% of all tests" until then, which was written
+        // before any test existed and was never re-measured; four documents had
+        // copied it. If it drifts again, count with
+        // `grep -h '^\s*@Test' Tests/*/*.swift | wc -l` per directory — the
+        // totals line up with what `swift test` reports.
         .testTarget(name: "CompassDomainTests", dependencies: ["CompassDomain"]),
         .testTarget(
             name: "CompassApplicationTests",

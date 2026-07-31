@@ -586,8 +586,22 @@ the user asking for it.
 
 It is the rule `SettingsEdits.remove(_:from:)` already keeps in the other
 direction: **abandoning a field is not confirming it.** Dismissal is ambiguous,
-and where it is ambiguous this sheet does the reversible thing. Add is one
-visible, enabled tap away on the same row.
+and where it is ambiguous this sheet does the reversible thing.
+
+**Correction, 2026-08-01.** This paragraph ended "Add is one visible, enabled tap
+away on the same row", and so did the doc comment it was written from. It is
+false on the install that ships. `AppComposition.seededHabits` seeds four and
+`Projection.habitCap` is 4, so a fresh install sits at the cap: `canAdd(in:)`
+requires `mayAddHabit`, which is false there, and the Add button is **disabled**.
+A name typed into that field cannot be committed at all until a habit is
+removed, which `SettingsCopy.addFooterAtCap` states in the footer.
+
+The decision stands and the argument gets stronger, not weaker. Below the cap,
+refusing to sweep the field costs the user one tap. At the cap, sweeping it
+could only fail silently or spend a slot nobody asked for. So the field must not
+be swept in either regime, and "one tap away" was never what carried the
+reasoning — it was a consolation offered to the reader, and it happens not to
+exist on day one.
 
 **What was given up, honestly.** A user who types a habit name and taps Done
 loses the typing. That is accepted, and the alternative — a permanent record

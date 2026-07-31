@@ -97,14 +97,22 @@ compass/
       Composition.swift     the composition root — the only place infrastructure
                             is constructed
     CompassUI/              imports: CompassApplication, CompassDomain
-  Tests/
-    CompassDomainTests/     ~80% of all tests. Pure. Milliseconds.
-    CompassApplicationTests/
-    CompassInfrastructureTests/
+  Tests/                    218 tests in 23 suites, counted 2026-08-01
+    CompassDomainTests/     85. Pure, no filesystem, milliseconds
+    CompassApplicationTests/    8
+    CompassInfrastructureTests/ 53. A real file on a real filesystem
+    CompassUITests/         72. `TodayModel` and `SettingsEdits` against fakes
   App/                      thin shell: calls the composition root, nothing else
-  Widget/
+  Widget/                   week 2. Does not exist yet
   project.yml
 ```
+
+**The domain suite is 39% of the tests, not 80%.** The figure "~80%" stood here,
+in `Package.swift`, in `.claude/skills/testing.md`, in `README.md` and in
+`memory/next-tasks.md` — written before a single test existed, then copied
+between documents and never counted. It is still the suite to write in first and
+still the one that needs no device; it is not four-fifths of the project. The
+point the number was making survives; the number did not.
 
 **Infrastructure is still constructed in exactly one place. That place is now
 inside the package.** The rule did not change; only its location did. The
@@ -1005,6 +1013,8 @@ begins before anything interesting is attempted.
   four habits seeded in the bundle with their names already set — Move, Read,
   Build, Reflect, chosen by the owner on 2026-07-31 and listed in
   `AppComposition.seededHabits`. Install it. Use it. Nothing else.
+  **Shipped 2026-07-31**; see below for what shipped with it that this list did
+  not schedule.
 - **Week 1b — the encoding, once it is being used.** The hand-written canonical
   byte encoding, `content_hash`, `prev` chaining, the encoding-stability test,
   the shard-invariance and replay-parity tests, the truncation test, the App
@@ -1014,7 +1024,8 @@ begins before anything interesting is attempted.
   append API, zero storage change. The second writer identity and the
   two-writer test (§4) ship **with** the widget, not after it.
 - **Week 3** — rule specs, the evaluation engine, `CertificateView`, sealed
-  locally with the enclave key only.
+  locally with the enclave key only. **Habit management is no longer part of
+  this stage; it landed in week 1a.**
 - **Week 4** — `OpenTimestampsAttestor`, weekly log-head anchoring, the
   standalone verifier script. The certificate gains a line of text; nothing else
   in the app changes.
@@ -1024,6 +1035,34 @@ begins before anything interesting is attempted.
 The ordering rule that matters more than the order: **the daily loop must be in
 daily use before anything cryptographic is built, and everything cryptographic
 must be additive behind a port.**
+
+### What week 1a actually shipped, beyond what it was given
+
+Recorded on 2026-08-01, additively. The list above is left standing as written
+because it is evidence about what was expected, and quietly editing a plan to
+match the outcome destroys the only record of the difference. Under
+`PROJECT_CONSTITUTION.md` §11 this is sequencing improving on contact with
+reality — the set of deliverables did not change, only when three of them
+arrived — so it needs no ADR.
+
+**Arrived earlier than planned:**
+
+- **The settings sheet, and habit add / remove / restore / rename.**
+  `SettingsView`, `SettingsEdits`, `SettingsCopy`. The build order placed habit
+  management no earlier than week 3. It came forward because week 1a seeded four
+  habits **at** the cap, and at the cap renaming is the only way to change a
+  name — Remove-then-Add mints a new `HabitID` and abandons the habit's history.
+  Removing archives (`habitArchived`) and deletes nothing.
+- **The declared name on the record.** Optional, never verified, and the sheet
+  says so out loud. It was not in any week.
+- **`Export`** — the bundle, plus `verify` and `restore`, scheduled for week 1b.
+  It has no UI surface yet; `memory/known-bugs.md` records that gap.
+- **The Record app icon**, and the composition root moved inside the package so
+  the wiring is testable (`memory/decisions.md`, 2026-07-31).
+
+**Not shipped, and still owed from week 1a:** the install on a physical phone,
+in daily use. That is week 1b's entry condition, and it is the reason week 1b
+has not begun.
 
 ### Why 1a and 1b are split, and the one escape hatch that permits it
 
