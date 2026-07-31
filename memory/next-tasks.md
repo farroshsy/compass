@@ -64,9 +64,10 @@ The goal of this block is a working checkbox, not a correct one. Ship it.
 - [ ] `Journal` — synchronous append of one line to an open `FileHandle`.
       **Base URL comes from a single injected `storeURL`.** Construct a file
       path nowhere else; that is what makes the App Group move a one-liner.
-- [ ] `TodayView`, `HabitRow`, `SpineView`, `TodayModel`. Bottom-anchored. Two
-      habits **seeded in the bundle with names already set** — no first-launch
-      naming flow, no keyboard, no permission prompt.
+- [ ] `TodayView`, `HabitRow`, `SpineView`, `TodayModel`. Bottom-anchored. **Four
+      habits seeded in the bundle with names already set** — Move, Read, Build,
+      Reflect, per the entry above — no first-launch naming flow, no keyboard,
+      no permission prompt.
 - [ ] **Install on the phone. Use it.** Free profile is acceptable here.
 
 ## Week 1b — the encoding, once the app is being used

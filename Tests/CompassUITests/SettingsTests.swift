@@ -346,6 +346,47 @@ struct SettingsTests {
         #expect(model.habits.map(\.name) == ["Move", "Read", "Build", "Reflect"])
     }
 
+    /// **Done commits every edit and no creation, and this pins the second
+    /// half.** The other three fields on the sheet revise something that already
+    /// exists: a rename is undone by another rename, a declared name by declaring
+    /// an empty one. Creation is not revisable. It mints a `HabitID` and appends
+    /// a `habitCreated` to a log with no tidying pass, so a habit minted from
+    /// abandoned typing is on disk forever, inside `witness.logHeads` for every
+    /// achievement sealed afterwards — and Remove archives rather than deletes,
+    /// so there is no way back.
+    ///
+    /// Asserted with a **free slot**, which is the case where the sweep would
+    /// actually succeed: at the cap `mayAddHabit` refuses it anyway, and a test
+    /// that could not tell the two apart would pass for the wrong reason.
+    ///
+    /// ``SettingsEdits/commitAll(into:)`` states the rule. This is what stops a
+    /// future session "fixing" the asymmetry by sweeping the add field, which
+    /// looks like consistency and is a permanent write nobody confirmed.
+    @Test("Done does not mint a habit out of the add field")
+    func doneRefusesToCreateFromAHalfTypedName() {
+        let seeded = Array(seededFour().prefix(3))
+        let recorder = FakeRecorder(continuing: seeded)
+        let model = model(events: seeded, recorder: recorder)
+
+        // Three habits, so there is a slot free and the cap is not what refuses.
+        #expect(model.mayAddHabit)
+
+        var edits = SettingsEdits(model)
+        edits.newHabitName = "Walk"
+        #expect(edits.canAdd(in: model))
+        edits.commitAll(into: model)
+
+        #expect(recorder.recorded.isEmpty)
+        #expect(model.habits.map(\.name) == ["Move", "Read", "Build"])
+
+        // And the text was not silently binned either: it is still in the field,
+        // and Add still does what the user can see it does.
+        #expect(edits.newHabitName == "Walk")
+        edits.add(into: model)
+        #expect(model.habits.map(\.name) == ["Move", "Read", "Build", "Walk"])
+        #expect(recorder.recorded.map(\.kind) == [.habitCreated])
+    }
+
     /// **The sequence reproduced on the device.** Type into a row, tap Remove,
     /// tap Restore: the row came back rendering the abandoned text, and Done
     /// wrote it to the log.

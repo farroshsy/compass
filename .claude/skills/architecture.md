@@ -29,6 +29,17 @@ overturning a decision.
   all. `App/` is a thin shell that calls the root and holds no branch, no
   `catch` and no forwarded argument. `docs/technical.md` §2,
   `memory/decisions.md` 2026-07-31.
+- **Behaviour never lives in `@State` inside a `View`.** What a control commits,
+  discards or refuses goes in a plain value beside the view; the view keeps the
+  layout. `@State` inside a `View` is state no test can construct or drive, and
+  `.claude/skills/testing.md` refuses snapshot tests and a broad XCUITest suite
+  out loud — so "test it through the view" is not available here, and pretending
+  otherwise is how bugs live forever. Measured, not aesthetic: two data bugs sat
+  in three `@State` properties in `SettingsView` — Done discarding the declared
+  name, and Done writing a rename the user had cancelled by removing the habit —
+  and **both survived a suite of 206 tests.** `Sources/CompassUI/SettingsEdits.swift`
+  is the pattern. It is the same rule as the composition root above, one target
+  down. `memory/decisions.md` 2026-07-31.
 - New capability goes behind an existing port if one fits. New ports are added
   in `CompassDomain/Ports.swift` and nowhere else.
 - Never mutate or delete an event. Un-checking appends `checkInRevoked`.

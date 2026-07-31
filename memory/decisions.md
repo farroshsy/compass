@@ -343,6 +343,10 @@ contradiction, and then in the same change.
 **First milestone, in full:** install the app, create two habits, tap, close,
 open it tomorrow, and it still knows.
 
+> *Superseded on the same day, kept as written.* "Create two habits" became
+> **four, seeded in the bundle** — see the 2026-07-31 entry below. Nothing else
+> in the sentence changed.
+
 ---
 
 ## 2026-07-31 — the composition root moved into the package
@@ -516,3 +520,81 @@ The register keeps the earliest creation, per habit, so it is order-independent
 like every other register in the fold.
 
 Accepted by the human on 2026-07-31.
+
+---
+
+## 2026-07-31 — behaviour does not live in `@State`
+
+**The rule.** A screen's behaviour — what a control commits, discards or refuses
+— goes in a plain value beside the `View`, and the `View` keeps the layout. It is
+now written down in `.claude/skills/architecture.md`, because until this entry
+the lesson existed only as a paragraph inside the file it produced, and a lesson
+with no rule behind it is one the next session re-learns.
+
+**The evidence, and it is measured.** `SettingsView` held three `@State`
+properties, and two data bugs lived in them:
+
+- Done committed habit renames and returned, silently dropping a declared name
+  typed and not submitted — the exact loss the handler's own comment said it
+  existed to prevent, on the one field the sheet was added for;
+- Done wrote a rename the user had cancelled by removing the habit, because an
+  in-flight edit was cleared only by committing it and the sweep ran over active
+  habits only. Remove then Restore put a name on screen that the log did not
+  have.
+
+Both are ordinary logic. Both were unreachable from a test, and **both survived a
+suite of 206 tests** — verified by running `swift test` at `f2fd73e`, the commit
+before the fix, which reports "206 tests in 23 suites passed". `@State` inside a
+`View` is state no test can construct or drive, and
+`.claude/skills/testing.md` refuses snapshot tests and a broad XCUITest suite out
+loud — so "test it through the view" was never available, and pretending
+otherwise is how these two lasted.
+
+**It is the same move as the composition root**, one target down, and that move
+landed a `PROJECT_CONSTITUTION.md` §2 update, an architecture rule and a dated
+entry here. This one landed the extraction and none of the three. That asymmetry
+is what this entry closes.
+
+The extraction is `Sources/CompassUI/SettingsEdits.swift`; the tests that could
+not exist before it are `Tests/CompassUITests/SettingsTests.swift`.
+
+**What was given up.** One more file and one more indirection between reading
+`SettingsView` and knowing what Done does. Paid down by the pointer at the
+`@State` declaration and by `SettingsEdits` carrying the reasoning at the site.
+
+**Under `PROJECT_CONSTITUTION.md` §12** the limb cited is maintainability, on the
+same measured grounds as the composition-root entry above. No security limb is
+claimed.
+
+---
+
+## 2026-07-31 — Done commits every edit and no creation
+
+**The decision.** The settings sheet's Done button commits the habit renames and
+the declared name, and deliberately does **not** commit the "New habit" field.
+The field's text dies with the sheet.
+
+**Why the asymmetry is the point.** Every other field on the sheet revises
+something that already exists and is revisable: a rename is undone by another
+rename, a declared name is withdrawn by declaring an empty one. Creating a habit
+is neither. It mints a `HabitID` and appends a `habitCreated` to a log that is
+append-only and has no tidying pass, so a habit minted from three abandoned
+characters is on disk forever — inside `witness.logHeads` for every achievement
+sealed afterwards — and Remove archives rather than deletes, so there is no way
+back. It could also spend the last free slot under the four-habit cap without
+the user asking for it.
+
+It is the rule `SettingsEdits.remove(_:from:)` already keeps in the other
+direction: **abandoning a field is not confirming it.** Dismissal is ambiguous,
+and where it is ambiguous this sheet does the reversible thing. Add is one
+visible, enabled tap away on the same row.
+
+**What was given up, honestly.** A user who types a habit name and taps Done
+loses the typing. That is accepted, and the alternative — a permanent record
+nobody confirmed — is worse in a project whose whole premise is that the log can
+be believed.
+
+Recorded because the Done comment previously claimed it committed *every* field,
+which was false, and because the next session to notice the asymmetry will read
+it as an oversight and "fix" it. `SettingsTests.doneRefusesToCreateFromAHalfTypedName`
+is what makes that fix fail out loud.
