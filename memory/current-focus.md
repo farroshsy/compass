@@ -37,7 +37,8 @@ xcrun simctl launch  booted dev.farros.compass
 `AppIcon60x60@2x.png`, and `CFBundleIconName = AppIcon` under `CFBundleIcons` in
 the built `Info.plist`.
 
-**What a fresh install shows,** screenshotted from that launch: `0` at 64pt,
+**What a fresh install shows,** screenshotted from that launch: `0` at 44pt
+(`TodayMetrics.numberPointSize`; design turn 6 brought it down from 64),
 "0 days recorded", an empty 28-dot spine, the settings glyph, and **four grey
 rows — Move, Read, Build, Reflect** — bottom-anchored. Grey, not coloured:
 `HabitTint` carries only *checked*-row fields and `HabitRow` fills an unchecked
