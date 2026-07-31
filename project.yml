@@ -72,15 +72,31 @@ targets:
 #
 #   xcodebuild … ASSETCATALOG_COMPILER_APPICON_NAME=""
 
-
-# Without this block xcodegen writes no `.xcscheme` at all, and a project with
-# no scheme has no buildables — so `xcodebuild -scheme Compass -destination
-# 'platform=iOS Simulator,…'` fails with "Unable to find a destination matching
-# the provided destination specifier", and `-showdestinations` reports
-# "Supported platforms for the buildables in the current scheme is empty" and
-# offers only an ineligible `Any iOS Device` placeholder. Only
-# `xcodebuild -target Compass -sdk iphonesimulator` worked, which is the one
-# route neither Xcode's Run button, nor CI, nor the iOS-simulator tooling takes.
+# A shared scheme, so Xcode's Run button, CI and the simulator tooling all have
+# something to act on. Keep it.
+#
+# It is NOT the fix for "no simulator destination", and an earlier version of
+# this comment said it was. That was disproved directly: a bare xcodegen iOS app
+# with no `schemes:` block and no package dependency produces the identical
+# "Supported platforms for the buildables in the current scheme is empty". The
+# scheme was never the variable.
+#
+# The real cause is environmental, and it is on this machine rather than in this
+# file. Xcode 26.3 (17C529) ships only the iOS 26.2 SDK, and the sole simulator
+# runtime installed is iOS 18.4 — so no simulator destination for the SDK the
+# toolchain builds against exists. With the scheme in place,
+# `-showdestinations` still lists no eligible destination and says of the
+# placeholder: "iOS 26.2 is not installed." Installing the matching iOS 26.2
+# simulator runtime (Xcode > Settings > Components) is what makes
+# `-destination 'platform=iOS Simulator,…'` work; nothing in this file can.
+#
+# Until then, this builds the app for the simulator on this machine:
+#
+#   xcodebuild -project Compass.xcodeproj -target Compass -sdk iphonesimulator26.2 \
+#     -configuration Debug CONFIGURATION_BUILD_DIR=$PWD/.build/products build
+#
+# `-target` with an explicit `-sdk` bypasses destination resolution entirely,
+# which is why it succeeds where `-scheme -destination` cannot.
 schemes:
   Compass:
     build:
