@@ -1,126 +1,140 @@
-# Read this if you are evaluating Compass
+# Evaluating Compass
 
 The main [README](../README.md) is written for whoever works on this next. This
-one is for someone deciding whether it is any good.
+document is for someone deciding whether the work is any good.
 
-Short version: **Compass is an engineering artifact, not a consumer product,
-and it was built that way on purpose.** If you evaluate it as a startup you
-will find it wanting, and you will be right.
-
----
-
-## What a critic said, and what is true
-
-A detailed critique landed on 2026-08-01. Most of it is correct. Rather than
-answer it in a thread, it is recorded here.
-
-### Conceded, without qualification
-
-**"You built infrastructure in search of a product."** Yes. Event sourcing,
-canonical bytes, an independent verifier, Merkle commitments and OpenTimestamps
-are invisible to someone tapping four boxes. Ninety percent of the work does not
-touch the experience.
-
-**"You never prove verification is valuable."** Also yes. Nobody has ever asked
-to check anyone's Duolingo streak. The demand for verified personal habit data
-is asserted here, not evidenced, and `docs/open-questions.md` had already
-recorded that the share artefact names nobody — the gap was known before it was
-pointed out, which is not the same as solved.
-
-**"You solved trust before motivation."** Correct, and it is the sharpest point
-made. Habit trackers fail because people stop opening them, not because people
-falsify them. Compass has no answer to *how do you get someone to open this
-tomorrow* beyond making it fast and refusing to nag. That may not be enough.
-
-**"Documentation has become a substitute for validation."** Fair. Every decision
-here can be explained; none has been tested against a person. Four separate
-passes on 2026-08-01 were documents correcting documents.
-
-**"Ledger describes it better than Compass."** A compass guides. This records.
-The name is aspirational in a way nothing in the product supports.
-
-**"'We deliberately' appears everywhere."** It does. A document that defends
-each choice reads as anxious rather than confident, and length is itself a
-defect — which is why this file is short.
-
-### Where the critique misfires
-
-**Product-market fit is scored 2/10 against a project that names it a non-goal.**
-`docs/product.md` states, in writing that predates the critique: *"It is not
-optimised for revenue, users, adoption, or product-market fit. There is no
-market."* Scoring an explicit non-goal is a category error. The valid version of
-the point is narrower and does land: even a single-user tool needs its single
-user to open it, and that has not happened yet.
-
-**"Your own docs admit blockchain isn't needed — that's almost a confession."**
-It is a disclosure, not a confession. ADR 0001 was written before any critique
-existed and states plainly: *"If the goal were 'Farros keeps his achievements',
-the correct answer is OpenTimestamps and no chain at all."* Volunteering the
-strongest argument against your own decision is the opposite of a confession
-being extracted. The chain is justified as a learning objective and labelled as
-one everywhere it appears.
-
-### Conceded, and it changes the roadmap
-
-**"The certificate is your strongest feature, not the blockchain."** Probably
-right, and it is the most useful sentence in the critique. The certificate has
-emotional weight; a Merkle root does not. That is worth acting on.
+**Compass is an engineering artifact, not a consumer product.** It is a
+single-user iOS habit tracker whose real subject is what it takes to produce a
+personal record that a stranger can check without trusting the app or its
+author. Judge it as you would a small systems project, not as a startup.
 
 ---
 
-## The one number that matters
+## The engineering questions it answers
 
-**Days of real use: zero.**
+These are the questions the repository exists to answer. Each has a concrete,
+inspectable answer in the code.
 
-482 tests. Four weeks shipped. A working app on a simulator. Nobody has opened
-it on a phone, once.
+**Can a canonical serialisation be reimplemented from its specification alone,
+in another language, with no shared code?**
+Yes. `docs/technical.md` §3 freezes eleven values in a fixed order.
+`verifier/compass-verify.py` was written from that section and reproduces every
+`content_hash` and every chain link produced by the Swift implementation. Zero
+lines are shared between them.
 
-`docs/technical.md` §11 gated the cryptography on *"the app has been opened
-three days running"*, precisely so the format could not be frozen before the
-loop was lived with. That gate was waived by the owner on 2026-08-01 and the
-cost is recorded, dated, in `memory/decisions.md`.
+**Can two OS processes append to one log without corrupting its order?**
+Yes, by refusing to pretend they are one writer. The app and the Home Screen
+widget each carry their own device UUID, `lamport` counter and `prev` chain,
+through a single append API. Total order is `(lamport, device)`, never
+wall-clock. The two-writer test drives two real processes and found a defect on
+the day it was written.
 
-So the critique's harshest reading is the correct one: this is rigorous
-engineering answering a question nobody has yet been shown to ask.
+**Can cryptographic claims be prevented from overstating what was verified?**
+The certificate reads *"Sealed on this device"* and gains an anchoring line only
+when a proof confirms. The verifier prints its own limit on every run: checking
+a Bitcoin header requires a chain it does not ship, so it reports the block
+height and merkle root and states that it did not take the last step.
+
+**Can an append-only event log stay simple enough for a single-user app?**
+Open question, leaning yes. The whole store is JSON Lines, one `write(2)` per
+event, no database, no third-party dependency. A five-year replay measures
+193 ms. The cost shows up elsewhere: a projection bug silently rewrote history
+across the whole log rather than one row.
+
+**Can third-party anchoring be integrated while staying invisible?**
+Yes so far. OpenTimestamps submission runs on `BGProcessingTask` with
+exponential backoff — never a timer, never on the launch path — and the user
+never sees a wallet, a chain name, a fee, or the word "mint".
+
+**Can a documentation corpus stay true to code that changes daily?**
+No, not without deliberate effort, and this is the most useful negative result
+here. Four separate correction passes in one day were documents fixing
+documents. Twice, a correction introduced a fresh overstatement in the opposite
+direction. The rule that eventually worked: verify against the machine, never
+against another document.
 
 ---
 
-## What is actually checkable here
+## What is checkable
 
-If you are evaluating the engineering rather than the product, these are the
-parts that hold up to inspection:
+| | |
+|---|---|
+| Lines shared between the app and its verifier | **0** |
+| Independent implementations of the canonical form | **2** (Swift, Python) |
+| Defects found by mutation testing that a green suite had missed | **4** |
+| Third-party dependencies | **0** |
+| Tests | **482** |
 
-**An independent verifier.** `verifier/compass-verify.py` — Python 3, standard
-library only, sharing no code with the app. It reproduces every `content_hash`
-and every chain link from the specification alone. A verifier that imported the
-app's encoder would only prove the app agrees with itself.
+**The verifier is the load-bearing artefact.** A verifier that imported the
+app's encoder would only prove the app agrees with itself. This one was written
+from the specification in another language and disagreed with the app once —
+over Merkle leaf ordering — which is the whole reason to build it that way.
 
-**It states its own limit on every run.** Checking a Bitcoin *header* needs a
-chain the script does not ship, so it reports the height and merkle root and
-says it did not take the last step.
-
-**Mutation testing, not coverage theatre.** Every fix in this repository was
-proved by reintroducing the bug and confirming a test fails. That discipline
-found four high-severity defects on 2026-07-31 that a green 218-test suite had
-missed — every one of them the app asserting something that had not happened.
+**Mutation testing, not coverage.** Every fix in this repository was proved by
+reintroducing the defect and confirming a test fails. That discipline caught
+four high-severity bugs a 218-test green suite had missed. All four were the
+same species: the app asserting on screen something that had not happened. None
+crashed. None failed a test.
 
 **Estimates are recorded when wrong.** The verifier was estimated at ~200 lines
-and came out at 579. That is in `product.md`, not quietly rounded away.
+and came out at 579, because re-deriving the claim from the log and implementing
+P-256 by hand were not in the estimate.
 
-**Failure branches are drawn.** See [OVERVIEW.md](OVERVIEW.md) — the verifier
-diagram shows every FAIL exit, because a diagram with only a happy path is how
-a tool gets trusted for things it does not do.
+**Failure paths are drawn, not implied.** The diagrams in [OVERVIEW.md](OVERVIEW.md)
+show every FAIL exit from the verification flow. A diagram with only a happy
+path is how a tool gets trusted for things it does not do.
 
 ---
 
-## The honest summary
+## Limitations
 
-The critique's scoreboard was: engineering 10, documentation 10, honesty 10,
-evidence of anyone wanting this 2.
+**Days of real use: zero.** The app has never been opened on a phone. Every
+design decision is untested against the only user it has.
 
-That is roughly right, and the project's own documents said so first. What
-Compass demonstrates is that a system of this integrity can be built and kept
-honest by one person. What it does not demonstrate is that the problem was worth
+**Verification demand is unvalidated.** No evidence is offered that anyone wants
+a cryptographically checkable habit record. The demand is assumed.
+
+**Motivation is unaddressed.** Habit trackers fail because people stop opening
+them, not because people falsify them. Compass has no answer beyond being fast
+and refusing to nag, and that may not be enough.
+
+**Documentation exceeds empirical evidence.** Every decision can be explained.
+None has been tested against a person.
+
+**The widget press is unverified.** No available simulator runtime could place a
+widget on a Home Screen. The 0.7-second interaction — the most valuable one in
+the product — has never been performed.
+
+**The name overpromises.** A compass guides. This records. *Ledger* would be
+accurate.
+
+**The format is frozen early.** The canonical encoding was fixed and the
+one-time re-projection hatch spent before the app had been used for a single
+day. That was a deliberate choice by the owner, recorded with its cost in
+`memory/decisions.md`.
+
+---
+
+## Design trade-offs
+
+**The blockchain layer exists as a learning objective, not a product
+requirement.** `docs/adr/0001` states the alternative plainly: for a single
+user, OpenTimestamps alone is the correct answer and no chain is needed. The
+limb is scheduled anyway, and labelled as a learning objective everywhere it
+appears.
+
+**Single user is a constraint, not modesty.** Accounts, permissions,
+onboarding, migration windows, abuse and billing are all absent because there is
+one user. Any solution reintroducing that difficulty has made the project worse.
+The cost is that no external validation loop exists.
+
+**Non-goals are binding and win over every other document.** Notifications,
+gamification, streak headlines, social features and visible blockchain concepts
+are refused with stated reasons in `docs/product.md`. Several are classified
+permanent; a few are Phase 1 exclusions with triggers.
+
+---
+
+What Compass demonstrates is that a system of this integrity can be built and
+kept honest by one person. It does not demonstrate that the problem was worth
 solving.
-
-Those are different claims, and only the first one is being made.
