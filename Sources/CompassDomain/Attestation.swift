@@ -37,8 +37,14 @@ public struct Attestation: Codable, Sendable, Hashable {
     public let publicKey: Data
     /// P-256 over `canonicalBytes`, never over `digest`. §6.7.
     public let signature: Data
-    /// Recorded honestly: a simulator-made proof must never look as strong as a
-    /// phone-made one.
+    /// What backed the key that signed, recorded honestly. §7.
+    ///
+    /// It is **not** a statement about what kind of machine ran the app: the iOS
+    /// Simulator on a T2 or Apple Silicon Mac signs with a real enclave key and
+    /// truthfully records `secureEnclave`. §7.0 bis, measured 2026-08-01.
+    ///
+    /// It is also **outside the digest**, so on a bundle from anyone else it is
+    /// unsigned text. Nothing may render it as verified — §9 Invariant 8.
     public let backing: SignerBacking
     public var state: AnchorState
     public var otsProof: Data?

@@ -55,8 +55,8 @@ public final class TodayModel {
     public private(set) var book: AwardBook = .empty
 
     /// Why the last achievement pass failed, or `nil` when the last one
-    /// succeeded — the raw reason, not a sentence. ``SettingsCopy`` composes what
-    /// is rendered.
+    /// succeeded — the reason, not a sentence. ``SettingsCopy`` composes what is
+    /// rendered.
     ///
     /// **A milestone that silently fails to issue is indistinguishable from one
     /// that was never earned**, and until 2026-08-01 both call sites did
@@ -76,7 +76,11 @@ public final class TodayModel {
     /// that keeps happening keeps saying so. That is also the argument for not
     /// persisting it — a failure that did not survive the process is one whose
     /// cause either recurred, and is on screen again, or did not.
-    public private(set) var awardFailure: String?
+    ///
+    /// **It is an ``AwardFailure`` rather than a `String` so that the error's own
+    /// text cannot reach this property.** See that type for what was on screen
+    /// before 2026-08-01.
+    public private(set) var awardFailure: AwardFailure?
 
     /// The certificate to put on screen, or `nil`.
     ///
@@ -413,7 +417,7 @@ public final class TodayModel {
             awardFailure = nil
             adopt(issued)
         } catch {
-            awardFailure = "\(error)"
+            awardFailure = AwardFailure(error)
         }
     }
 
@@ -741,6 +745,58 @@ public final class TodayModel {
     /// it on `scenePhase` alone.
     public func refreshDay() {
         today = clock.today(cutoffHour: DayBoundary.cutoffHour)
+    }
+}
+
+/// **What a failed achievement pass is allowed to say out loud.**
+///
+/// It carries the error's *identity* — its domain and its code — and never its
+/// message. `TodayModel.awardFailure` was `"\(error)"` until 2026-08-01, and
+/// driving the settings sheet with an unreadable `awards.jsonl` put this into the
+/// Records footer, wrapped and running off the bottom of the sheet:
+///
+/// ```text
+/// Error Domain=NSCocoaErrorDomain Code=257 "The file “awards.jsonl” couldn’t be
+/// opened because you don’t have permission to view it."
+/// UserInfo={NSFilePath=/Users/…/Library/Developer/CoreSimulator/Devices/4D3615…
+/// /data/Containers/Shared/AppGroup/64541B32-…/Compass/awards.jsonl, …}
+/// ```
+///
+/// The host's absolute path, the CoreSimulator device UUID and the App Group
+/// UUID, on screen, in an app whose whole argument is that nothing leaves the
+/// phone unless the user sends it. `CanonicalEncodingError` is deliberately
+/// payload-minimal for exactly this reason — its comment notes that an error
+/// message is somewhere user data can travel — but that discipline binds only the
+/// errors *this project* writes. Every Foundation error that can reach the catch
+/// carries a path, and those are the ones a real failure produces.
+///
+/// **Domain and code, and nothing else.** `NSError.userInfo` is where the path
+/// lives and `localizedDescription` is where it gets interpolated; `domain` is a
+/// constant and `code` is an integer. For an error this project defines, the
+/// bridged domain is the type's qualified name — `CompassDomain.CanonicalEncodingError`
+/// — which is the diagnosis a future session actually needs, since there is
+/// nobody to file a report with. The full error still reaches stderr:
+/// `AchievementIssuer.evaluate()` writes it before rethrowing.
+///
+/// **It is a type rather than a `String` so the fix cannot be undone by
+/// assignment.** `awardFailure = "\(error)"` no longer compiles, which is the
+/// only version of this fix that survives the next person in a hurry.
+public struct AwardFailure: Equatable, Sendable {
+
+    /// Path-free and safe to render. Two examples, both real:
+    /// `NSCocoaErrorDomain 257`, `CompassDomain.CanonicalEncodingError 1`.
+    ///
+    /// **Short because of what it is, not because it is truncated.** A domain is
+    /// either a Foundation constant or a Swift type's qualified name, and a code
+    /// is an integer — so the length is a property of the program rather than of
+    /// the data, which is exactly the difference from the sentence this replaced
+    /// and why no clamp is applied. The original overflowed the sheet at 448
+    /// characters; this is 25.
+    public let reason: String
+
+    public init(_ error: some Error) {
+        let bridged = error as NSError
+        reason = "\(bridged.domain) \(bridged.code)"
     }
 }
 

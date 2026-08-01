@@ -27,12 +27,12 @@ What it checks, and it prints every one of these as a line you can read:
                       recomputed from the events that were counted.
   4.  attestations  — the P-256 signature over the canonical bytes, verified
                       here in pure Python against the public key in the bundle,
-                      and **what backed the key that made it**: Secure Enclave
-                      or software. Reported per record and again for the bundle
-                      as a whole, because `docs/technical.md` §8 requires that a
-                      simulator-made proof never look as strong as a phone-made
-                      one, and a reader who reads only the summary is still a
-                      reader.
+                      and **what the record says backed the key that made it**:
+                      Secure Enclave or software. Reported per record and again
+                      for the bundle as a whole, because a reader who reads only
+                      the summary is still a reader — and reported as the
+                      issuer's unverified claim, never as a check that passed,
+                      because `backing` sits outside the digest.
   5.  anchors.jsonl — the OpenTimestamps proof: every operation is replayed
                       from the digest, and each attestation it reaches is
                       reported as a pending calendar promise or as a Bitcoin
@@ -49,6 +49,10 @@ rather than leaving it to be assumed:
   *   It does not decide whether the person named in the record is who they say
       they are. Nothing in Compass ever claimed it could — the declared name is
       self-declared and unverified by construction.
+  *   It does not establish what hardware held the signing key. `backing` is
+      outside the digest, so on a bundle from anyone else it is unsigned text,
+      and no signature can prove what made it in any case. Every reading of that
+      field is printed as a claim, never as a passed check.
 """
 
 import base64
@@ -224,13 +228,48 @@ def sha256(data):
     return hashlib.sha256(data).digest()
 
 
-# `docs/technical.md` §8, and `Signer.swift`'s own promise: "On the simulator
-# there is no enclave and the key falls back to software; `backing` records that
-# honestly." Spelled once so the per-record line and the summary cannot drift
-# into saying two different things about the same fact.
+# What the record says backed its key. `docs/technical.md` §8,
+# `docs/achievement-protocol.md` §7.
+#
+# **`backing` is outside the digest.** §6.1 freezes the canonical form and does
+# not list it, deliberately — a signature cannot prove what hardware held the key
+# that made it. So on a bundle received from someone else the field is
+# attacker-controlled text that no signature covers, and *no reading of it is a
+# check that passed*. §9 Invariant 8: undigested fields are never rendered as
+# part of a verified claim, and where undigested text is shown at all it is
+# visibly marked unverified.
+#
+# The two directions are not symmetric, and that is why they print differently:
+#
+#   * `secureEnclave` is the **strongest** claim the format can make and
+#     therefore the one a forger writes. Flipping "software" to "secureEnclave"
+#     on a genuine bundle and recomputing the manifest costs nothing and leaves
+#     every other check on this run passing, so this reading is reported as
+#     UNCHECKED — the same marker a record that says nothing gets — and it lands
+#     in the end-of-run list of things this run could not do. Until 2026-08-01 it
+#     printed with the same `ok` marker as the P-256 signature and the chain,
+#     which is the one line on the page a forger would have chosen.
+#   * `software` is a claim **against** the record's own strength. Nobody forges
+#     downward, so believing it costs a reader nothing. It prints unmarked, with
+#     wording that attributes it to the record rather than to this run.
+#
+# Spelled once each so the per-record line and the summary cannot drift into
+# saying two different things about the same fact.
 SOFTWARE_KEY_NOTE = (
     "  the key is SOFTWARE-backed, per the record — a software key signs just as "
     "validly, and attests to no particular device"
+)
+
+ENCLAVE_KEY_CLAIM = (
+    "CLAIMS a Secure Enclave key, and nothing here checked that: `backing` is "
+    "outside the digest, so it is unsigned text on a bundle from anyone else"
+)
+
+EVERY_KEY_CLAIMS_ENCLAVE = (
+    "every record here CLAIMS a Secure Enclave key and this run verified none of "
+    "those claims — `backing` is outside the digest, a forged one leaves every "
+    "other check on this bundle passing, and no signature can prove what "
+    "hardware held a key"
 )
 
 
@@ -721,13 +760,17 @@ def verify(bundle):
         else:
             report.bad("  the P-256 signature does NOT verify")
 
-        # **What kind of key it was, printed whether or not the signature
-        # verified.** `docs/technical.md` §8: on the simulator there is no
-        # enclave and the key falls back to software, and the record says so
-        # "rather than letting a simulator-made proof look as strong as a
-        # phone-made one". That sentence is about what a reader concludes, so
-        # this line cannot sit inside the `if` above — a bundle whose signature
-        # fails is exactly a bundle whose provenance a reader wants to know.
+        # **What the record says backed the key, printed whether or not the
+        # signature verified.** `docs/technical.md` §8 is about what a reader
+        # concludes, so this line cannot sit inside the `if` above — a bundle
+        # whose signature fails is exactly a bundle whose provenance a reader
+        # wants to know.
+        #
+        # None of the three branches is an `ok`. `ok` is reserved for a check
+        # that recomputed something: the manifest digests, the chain, the
+        # evidence root, the P-256 signature. `backing` is read, not checked.
+        # See the constants above for why the strongest reading is the one that
+        # had to change.
         #
         # A record that does not say is reported as not saying. It is never
         # assumed to be the stronger of the two, and it is not a crash: an older
@@ -735,7 +778,7 @@ def verify(bundle):
         # to survive.
         backing = attestation.get("backing")
         if backing == "secureEnclave":
-            report.ok("  the key is Secure Enclave-backed, per the record")
+            report.cannot("  %s %s" % (name, ENCLAVE_KEY_CLAIM))
         elif backing == "software":
             report.note(SOFTWARE_KEY_NOTE)
         else:
@@ -769,25 +812,28 @@ def verify(bundle):
             "person is asserted, not proven" % len(keys)
         )
 
-    # **What backed those keys, said once, at the level of the whole bundle.**
+    # **What the records say backed those keys, said once, at the level of the
+    # whole bundle.**
     #
-    # `docs/technical.md` §8 requires that a simulator-made proof never look as
-    # strong as a phone-made one, and that is a statement about what a reader
-    # concludes — so it has to survive a reader who skims the per-record lines
-    # and reads only the summary. Without this, a bundle every one of whose
-    # signatures came from a software key ended a clean run with "Every check
-    # that could run, passed." and nothing else, which is exactly the mistake §8
-    # names.
+    # `docs/technical.md` §8 is a statement about what a reader concludes, so it
+    # has to survive a reader who skims the per-record lines and reads only the
+    # summary. Without this, a bundle every one of whose signatures came from a
+    # software key ended a clean run with "Every check that could run, passed."
+    # and nothing else.
     #
-    # A software key is reported as **unchecked rather than failed**: it is not a
-    # forgery and the signature is perfectly valid. What it cannot support is the
-    # claim that a particular device made it, and that distinction is the whole
-    # content of the sentence.
+    # **Neither branch is an `ok`.** Both are readings of an undigested field.
+    # The enclave branch was an `ok` until 2026-08-01, which made the strongest
+    # and most forgeable claim in the bundle the one rendered with the same
+    # marker as the P-256 signature — while the two weaker branches hedged
+    # correctly. Nothing here is a *failure* either: a software key is not a
+    # forgery and its signature is perfectly valid; a claimed enclave key may
+    # well be one. What neither can support is a conclusion about which device
+    # made this bundle, and that distinction is the whole content of these lines.
     backings = [a.get("backing") for a in attestations.values()]
     if backings:
         weak = [b for b in backings if b != "secureEnclave"]
         if not weak:
-            report.ok("every signature here came from a Secure Enclave key")
+            report.cannot(EVERY_KEY_CLAIMS_ENCLAVE)
         else:
             report.cannot(
                 "%d of %d signature(s) here were NOT made by a Secure Enclave key — a "

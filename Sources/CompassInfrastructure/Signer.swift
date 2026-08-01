@@ -32,9 +32,21 @@ import Security
 /// `docs/technical.md` §8.
 ///
 /// It is never shown, never named, never exported, and the user is never told it
-/// exists. On the simulator there is no enclave and the key falls back to
-/// software; ``backing`` records that honestly, because a simulator-made proof
-/// must never look as strong as a phone-made one.
+/// exists. Where there is no enclave the key falls back to software, and
+/// ``backing`` records which of the two actually signed.
+///
+/// **The fallback is not the simulator case**, though this comment said it was
+/// until 2026-08-01. `SecureEnclave.isAvailable` is `true` inside the iOS
+/// Simulator on any host that has an enclave — every T2 and Apple Silicon Mac —
+/// so the simulator mints a real enclave key, in the *host's* enclave, and the
+/// record honestly says `secureEnclave`. Measured on this machine, an Intel Mac
+/// with an Apple T2 Security Chip. The software branch below is reached only on a
+/// host with no Secure Enclave at all, or when a test passes `preferEnclave:
+/// false`.
+///
+/// So ``backing`` answers "what backed this key" and has never answered "what
+/// kind of machine ran the app". `docs/achievement-protocol.md` §7.0 bis is what
+/// its rule can and cannot deliver, and `memory/known-bugs.md` records the gap.
 public struct Signer: Sendable {
 
     /// Recorded on every attestation. `docs/achievement-protocol.md` §7.

@@ -93,28 +93,30 @@ struct AchievementIssuerTests {
     }
 
     /// **`backing` on the record is the signer's own, not a constant.**
-    /// `docs/technical.md` §8, `docs/achievement-protocol.md` §7.
+    /// `docs/technical.md` §8, `docs/achievement-protocol.md` §7 — "`backing`
+    /// MUST be recorded honestly".
     ///
-    /// > On the simulator there is no enclave and the key falls back to software;
-    /// > the record says so, rather than letting a simulator-made proof look as
-    /// > strong as a phone-made one.
+    /// This is the *writer* half of that rule, and §7.0 bis is why it is the half
+    /// that can actually be delivered: `backing` says what backed the key, and no
+    /// field in the format says what kind of machine ran the app.
     ///
-    /// Nothing asserted that until 2026-08-01, and the cost was measured:
+    /// Nothing asserted the rule until 2026-08-01, and the cost was measured:
     /// replacing `backing: signer.backing` in `AchievementIssuer.seal` with a
     /// hardcoded `.secureEnclave` left **all 493 tests passing**. The value was
     /// reaching `attestations.jsonl` and the standalone verifier the whole time,
-    /// and every simulator-made bundle would have claimed the strongest
-    /// provenance the format can express.
+    /// and every bundle would have claimed the strongest provenance the format
+    /// can express.
     ///
     /// It is driven through the whole issuer rather than through `Signer` alone —
     /// `SignerTests` already pins `Signer.backing` itself — because the defect is
     /// not in the signer. It is in whether what the signer knows survives the
     /// trip onto disk.
     ///
-    /// The software key is made the way a simulator makes one, through
-    /// `Signer(store:preferEnclave:)`, and the issuer then *restores* it. That
-    /// is the real path: a build that has ever run without an enclave keeps the
-    /// software key in its keychain forever.
+    /// The software key is forced through `Signer(store:preferEnclave:)`, and the
+    /// issuer then *restores* it. That restore is the real path: a build that has
+    /// ever run on a host with no enclave keeps the software key in its keychain
+    /// forever. It is **not** how a simulator behaves — on a T2 or Apple Silicon
+    /// Mac the simulator has an enclave and takes the other branch.
     @Test("A software-backed key is recorded as software, on disk, by the issuer")
     func theRecordedBackingIsTheSignersOwn() throws {
         try seededStore(days: 10) { layout, _, issuer, keys in
