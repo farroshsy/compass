@@ -173,3 +173,58 @@ public struct AnchorDrain: Sendable {
         self.logAnchor = logAnchor
     }
 }
+
+/// Produces the export bundle, in memory, so a surface can hand it to the
+/// system's file exporter. `docs/technical.md` §8, `docs/product.md`.
+///
+/// **It exists because `docs/product.md` budgets export to the settings sheet —
+/// "Rename, archive, export" — and until 2026-08-01 there was no way to reach
+/// it.** `Exporter` was implemented and tested in week 1 and called from nothing
+/// outside its own test file, so every bundle ever verified was produced by a
+/// helper process written beside the app. That makes the mission sentence
+/// unreachable: a record you cannot hand to anyone is not a record you can hand
+/// to a stranger.
+///
+/// **It returns bytes rather than taking a destination**, which is the one design
+/// decision in this port. `fileExporter` owns the destination — the user picks
+/// it in a system sheet the app never sees inside — so an adapter that wrote to a
+/// URL would have to write somewhere temporary first and the surface would then
+/// copy it. Bytes are also what makes "the control produces the same bundle
+/// `Export.swift` produces" a thing a test can assert, rather than a thing two
+/// call sites are trusted to keep true.
+///
+/// `async` for the same reason ``Awarding`` and ``Anchoring`` are: it reads every
+/// file in the store and digests all of them, and the main actor is where the
+/// three-second loop lives.
+public protocol Exporting: Sendable {
+    func exportBundle() async throws -> ExportBundle
+}
+
+/// One export bundle, held as bytes.
+///
+/// `docs/technical.md` §8 fixes the member list and every copy of it — here, in
+/// `docs/product.md`, `docs/adr/0002` and `memory/next-tasks.md` — is updated
+/// together. This type does not restate it: it carries whatever
+/// `Exporter.bundle(at:)` put in, so a file added to §8's list appears here with
+/// no change to this file, and a surface writing the bundle out cannot drop a
+/// member it has never heard of.
+public struct ExportBundle: Sendable, Hashable {
+
+    /// Bundle-relative path -> bytes. Includes `manifest.json`, which digests
+    /// every other member and is therefore the one a reader checks first.
+    ///
+    /// Paths use `/` and are at most one level deep — `rules/streaks.json`,
+    /// `proofs/<id>.ots`. A surface writing these out creates the intermediate
+    /// directory; nothing here ever escapes the bundle, because nothing here is
+    /// user-supplied.
+    public let files: [String: Data]
+
+    /// The instant in `manifest.json`, so a surface can name the file after it
+    /// without re-reading the manifest it just built.
+    public let exportedAt: Date
+
+    public init(files: [String: Data], exportedAt: Date) {
+        self.files = files
+        self.exportedAt = exportedAt
+    }
+}

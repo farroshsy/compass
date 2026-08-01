@@ -42,13 +42,24 @@ silence.
 |---|---|
 | `manifest.json` | every file's SHA-256 |
 | `events.jsonl` | canonical bytes, `content_hash`, and each writer's `prev` chain from genesis to its head |
-| `awards.jsonl` | the achievement canonical form and its digest; **that the log still supports the claim** — the qualifying days are re-derived and the Merkle evidence root recomputed from the events that were counted; and that each `witness.logHeads` entry is a point that exists on that writer's chain |
+| `awards.jsonl` | the achievement canonical form and its digest; **that the log still supports the claim** — the qualifying days are re-derived and the Merkle evidence root recomputed from the events that were counted, with the leaves in `(lamport, device)` order per §4.1; and that each `witness.logHeads` entry is a point that exists on that writer's chain |
 | `attestations.jsonl` | the P-256 signature over the canonical bytes, verified against the public key in the bundle |
 | `anchors.jsonl`, `proofs/*.ots` | that the anchored digest is the digest of those heads, and that the heads are this log's; then every OpenTimestamps operation replayed from the digest, reporting each attestation it reaches as a pending calendar promise or a Bitcoin block commitment |
 
 Re-deriving the claim is the part that separates *this record is signed* from
 *this record is true*. A verifier that checked only signatures would pass a
 bundle whose log says one thing and whose certificate says another.
+
+**The evidence leaves are sorted, and the order is `(lamport, device)`, never
+day.** `docs/achievement-protocol.md` §4.1 freezes it and says nothing about
+days. This file iterated `days` until 2026-08-01, which is the same answer on
+any log appended one day after another and a *different root* on a log where one
+day holds several events written out of sequence — the ordinary shape once two
+writers exist, since the widget and the app interleave. It agreed with the app on
+every bundle the suite had, because every one of them was tidy. A verifier that
+agrees only when the data is tidy is worse than none, because it is believed.
+`VerifierTests.evidenceLeavesAreInTotalOrderNotDayOrder` is the fixture that can
+tell the two apart.
 
 ## What it does not check, and says so on every run
 

@@ -292,6 +292,142 @@ struct VerifierTests {
         }
     }
 
+    // MARK: §4.1 — the leaf order, on a log that can tell the two apart
+
+    /// **A log whose day order is not its `(lamport, device)` order**, which is
+    /// the only kind of log that can distinguish a correct evidence root from a
+    /// plausible one.
+    ///
+    /// Two writers, two habits, five check-ins appended out of day sequence: the
+    /// two days that are checked in last are the two *earliest* days, and one day
+    /// holds two events written by different writers at different times. That is
+    /// not a contrived shape — it is what the widget and the app produce whenever
+    /// a day is filled in after a later one, and `docs/technical.md` §4 has them
+    /// interleaving by design.
+    ///
+    /// Every earlier bundle in this suite is tidy: one writer's check-ins,
+    /// appended one day after another, so day order and `(lamport, device)` order
+    /// coincide and a reader sorting by either reaches the same root. A verifier
+    /// that agrees only on tidy data is worse than none, because it is trusted.
+    /// This fixture is the one that fails it.
+    ///
+    /// It builds the store with a **fresh journal per write** — the cold path
+    /// `WidgetStore.toggle` is on — so the two writers really do interleave
+    /// through the tail rather than through one process's cached resume.
+    private func interleavedBundle<T>(_ body: (URL, StoreLayout) throws -> T) throws -> T {
+        try withTemporaryStore { layout in
+            let issuing = frozenClock(at: "2026-02-10T09:00:00+07:00")
+
+            func write(
+                _ writer: DeviceID, _ kind: EventKind, on iso: String,
+                _ payload: EventPayload, source: CheckInSource?
+            ) throws {
+                let journal = try EventJournal(layout: layout, writer: writer, clock: issuing)
+                defer { journal.close() }
+                try journal.record(kind: kind, day: day(iso), source: source, payload: payload)
+            }
+
+            try write(writerApp, .habitCreated, on: "2026-01-01", .habit(habitA, name: "Move"), source: nil)
+            try write(writerWidget, .habitCreated, on: "2026-01-01", .habit(habitB, name: "Read"), source: nil)
+
+            // The five check-ins, in an order no day-sorted reader can reproduce:
+            // the last day first, then the first, then the middle one twice.
+            try write(writerApp, .checkedIn, on: "2026-01-03", .habit(habitA), source: .tap)
+            try write(writerWidget, .checkedIn, on: "2026-01-03", .habit(habitB), source: .widget)
+            try write(writerApp, .checkedIn, on: "2026-01-01", .habit(habitA), source: .tap)
+            try write(writerWidget, .checkedIn, on: "2026-01-02", .habit(habitB), source: .widget)
+            try write(writerApp, .checkedIn, on: "2026-01-02", .habit(habitA), source: .tap)
+
+            // An "any habit" total at three days, so the counted set spans all
+            // three days and one day contributes two leaves. The shipped rows
+            // start at 100 and cannot fire over a three-day log; this one is
+            // written into the store's own `rules/`, which `RuleStore` reads and
+            // never overwrites.
+            _ = try RuleStore(layout: layout).load()
+            try Data(
+                #"[{"id":"total.recorded.3","kind":"total","threshold":3,"scope":{"requiresAll":false}}]"#
+                    .utf8
+            ).write(to: layout.rules.appendingPathComponent("interleaved.json"))
+
+            let keys = KeychainStore(
+                service: "dev.farros.compass.tests.\(UUID().uuidString)",
+                account: "achievement-key"
+            )
+            defer { keys.delete() }
+            let journal = try EventJournal(layout: layout, writer: writerApp, clock: issuing)
+            defer { journal.close() }
+            _ = try AchievementIssuer(
+                layout: layout, recorder: journal, clock: issuing, keychain: keys
+            ).issue()
+
+            let bundle = layout.storeURL.appendingPathComponent("bundle", isDirectory: true)
+            try Exporter(layout: layout).export(
+                to: bundle, at: instant("2026-02-14T09:00:00Z")
+            )
+            return try body(bundle, layout)
+        }
+    }
+
+    /// **`docs/achievement-protocol.md` §4.1 is the arbiter, and both readers now
+    /// obey it.**
+    ///
+    /// The leaves are "the qualifying events' `content_hash` values, in
+    /// `(lamport, device)` order" — the document says nothing about days, and on
+    /// this log the two orders give two different roots. The test computes both
+    /// from §4.1's own primitives rather than from either implementation's
+    /// gathering code, then asserts which one the app recorded and that the
+    /// standalone verifier reaches the same one.
+    ///
+    /// Found by reading `evidence_for` in `verifier/compass-verify.py`, which
+    /// iterated `days` and handed the result straight to `evidence_root`. It
+    /// passed every bundle this suite had because every one of them was appended
+    /// in day order.
+    @Test("§4.1: the evidence leaves are in (lamport, device) order, never day order")
+    func evidenceLeavesAreInTotalOrderNotDayOrder() throws {
+        try interleavedBundle { bundle, layout in
+            let events = try JournalReader(url: layout.events).read().events
+            let checkIns = events.filter { $0.kind == .checkedIn }
+            #expect(checkIns.count == 5)
+
+            // The two candidate leaf sequences, spelled out here rather than
+            // borrowed: day-major (what a reader that iterates days produces) and
+            // §4.1's `(lamport, device)`.
+            let days = Set(checkIns.map(\.day)).sorted()
+            let dayMajor = days.flatMap { day in
+                checkIns.filter { $0.day == day }.sorted { $0.order < $1.order }
+            }
+            let totalOrder = checkIns.sorted { $0.order < $1.order }
+
+            // **The fixture is load-bearing.** If this ever holds, the log has
+            // become tidy again and the test below has stopped proving anything.
+            #expect(
+                dayMajor.map(\.lamport) != totalOrder.map(\.lamport),
+                "the fixture no longer distinguishes day order from (lamport, device) order"
+            )
+
+            let dayRoot = EvidenceRoot.root(
+                ofLeaves: try dayMajor.map { EvidenceRoot.leaf(try $0.contentHash) }
+            )
+            let specRoot = EvidenceRoot.root(
+                ofLeaves: try totalOrder.map { EvidenceRoot.leaf(try $0.contentHash) }
+            )
+            #expect(dayRoot != specRoot)
+
+            // The app sorts, so it recorded §4.1's root and not the other one.
+            let awards = try AwardStore(layout: layout).readAwards()
+            #expect(awards.achievements.count == 1)
+            let witness = try #require(awards.achievements.first).witness
+            #expect(hex(witness.evidenceRoot) == hex(specRoot))
+            #expect(hex(witness.evidenceRoot) != hex(dayRoot))
+
+            // And the second reader, sharing none of that code, agrees.
+            let result = try runVerifier(on: bundle)
+            #expect(result.status == 0, Comment(rawValue: result.output))
+            #expect(result.output.contains("evidence root recomputed"))
+            #expect(!result.output.contains("the evidence root does not cover"))
+        }
+    }
+
     // MARK: Running it
 
     private struct VerifierRun {

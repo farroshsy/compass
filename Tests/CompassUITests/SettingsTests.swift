@@ -710,6 +710,13 @@ struct SettingsTests {
             SettingsCopy.removedFooterAtCap,
             SettingsCopy.addFooter,
             SettingsCopy.addFooterAtCap,
+            // The export section, added 2026-08-01. The bundle it writes
+            // contains signatures, proofs and digests; the sheet still describes
+            // what the file *is* and leaves the claims about what it proves to
+            // the certificate and to the verifier, which are the two things that
+            // have earned them.
+            SettingsCopy.exportButton,
+            SettingsCopy.exportFooter,
         ]
         for sentence in copy {
             for claim in SettingsCopy.unearnedClaims {

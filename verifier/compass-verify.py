@@ -506,6 +506,21 @@ def counted_days(rule, cells):
 
 
 def evidence_for(rule, days, cells):
+    """The qualifying events, **in `(lamport, device)` order** — §4.1 freezes the
+    evidence leaves in that order and in no other.
+
+    The sort is the whole point of this function and it is applied to the *whole*
+    set, not per day. Collecting day by day and concatenating produces day order,
+    which coincides with `(lamport, device)` order only when every day's events
+    were appended in day sequence. Two writers make that untrue routinely: the
+    widget and the app interleave, and a day checked in late lands after a later
+    day's events. On such a log a day-ordered reader computes a different root
+    from the app and disagrees with a bundle that is correct — which is worse than
+    not checking, because it is a verifier that agrees only when the data is tidy.
+
+    `device` is compared as the ASCII UUID string it is on disk, which is the same
+    comparison `EventOrder` makes in `CompassDomain/Event.swift`.
+    """
     habit = rule["scope"].get("habit")
     events = []
     for day in days:
@@ -513,9 +528,8 @@ def evidence_for(rule, days, cells):
             if day in cells.get(habit, {}):
                 events.append(cells[habit][day])
         else:
-            same = [byDay[day] for byDay in cells.values() if day in byDay]
-            events.extend(sorted(same, key=lambda e: (e["lamport"], e["device"])))
-    return events
+            events.extend(byDay[day] for byDay in cells.values() if day in byDay)
+    return sorted(events, key=lambda e: (e["lamport"], e["device"]))
 
 
 # --------------------------------------------------------------------------

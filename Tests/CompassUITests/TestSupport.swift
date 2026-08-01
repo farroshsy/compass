@@ -400,3 +400,51 @@ func attestation(
         confirmedAt: confirmedAt.map(instant)
     )
 }
+
+/// The export port, answering from a value. It records how many bundles were
+/// asked for, because the control must build one per press and not one per
+/// render.
+final class FakeExporting: Exporting {
+
+    struct Failure: Error, CustomStringConvertible {
+        var description: String { "the store went away" }
+    }
+
+    private struct State {
+        var bundle: ExportBundle
+        var calls = 0
+        var fails: Bool
+    }
+
+    private let state: Mutex<State>
+
+    init(bundle: ExportBundle = ExportBundle(files: [:], exportedAt: .distantPast), fails: Bool = false) {
+        state = Mutex(State(bundle: bundle, fails: fails))
+    }
+
+    var calls: Int { state.withLock { $0.calls } }
+
+    func exportBundle() async throws -> ExportBundle {
+        try state.withLock { state in
+            state.calls += 1
+            guard !state.fails else { throw Failure() }
+            return state.bundle
+        }
+    }
+}
+
+/// A bundle with the shape a real one has — a nested member under `rules/`, a
+/// manifest, and bytes that differ per file so a wrapper that mixed two up
+/// would be visible.
+func sampleBundle(at iso: String = "2026-08-01T09:00:00+07:00") -> ExportBundle {
+    ExportBundle(
+        files: [
+            "events.jsonl": Data("{\"v\":1}\n".utf8),
+            "awards.jsonl": Data("{\"id\":\"total.recorded.100@2026-01-01\"}\n".utf8),
+            "rules/totals.json": Data("[]".utf8),
+            "proofs/total.recorded.100@2026-01-01.ots": Data([0x00, 0x4F, 0x54, 0x53]),
+            "manifest.json": Data("{\"exportedAt\":0,\"files\":{}}".utf8),
+        ],
+        exportedAt: instant(iso)
+    )
+}

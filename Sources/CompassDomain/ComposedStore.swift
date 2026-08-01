@@ -62,6 +62,17 @@ public struct ComposedStore: Sendable {
     /// otherwise.
     public let anchoring: (any Anchoring)?
 
+    /// The export bundle the settings sheet hands to `fileExporter`. `nil` on a
+    /// launch that could not open the store — there is nothing to export — and
+    /// in a test that does not care.
+    ///
+    /// `docs/product.md` budgets export to the settings sheet and has since the
+    /// first draft; this port is what finally reaches it. Until 2026-08-01
+    /// `Exporter` was implemented, tested, and called from nowhere but its own
+    /// tests, so the one artifact the survival story rests on could only be
+    /// produced by a helper process written outside the app.
+    public let exporting: (any Exporting)?
+
     /// `false` when the store could not be opened at all.
     ///
     /// `docs/technical.md` §6 ends its damaged-log policy with "never silently
@@ -79,6 +90,7 @@ public struct ComposedStore: Sendable {
         absorber: (any EventAbsorber)? = nil,
         awarding: (any Awarding)? = nil,
         anchoring: (any Anchoring)? = nil,
+        exporting: (any Exporting)? = nil,
         isStoreAvailable: Bool = true
     ) {
         self.events = events
@@ -89,6 +101,7 @@ public struct ComposedStore: Sendable {
         self.absorber = absorber
         self.awarding = awarding
         self.anchoring = anchoring
+        self.exporting = exporting
         self.isStoreAvailable = isStoreAvailable
     }
 }

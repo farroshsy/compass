@@ -51,11 +51,35 @@ public struct Exporter: Sendable {
 
     public let layout: StoreLayout
 
-    public init(layout: StoreLayout) {
+    /// Only ``exportBundle()`` reads it — the ``Exporting`` port takes no
+    /// instant, because a surface has no business choosing the one that goes in
+    /// the manifest. Every other entry point is handed an explicit `at:`, which
+    /// is what keeps ``export(to:at:)`` a pure function of the store and a date.
+    private let clock: SystemClock
+
+    public init(layout: StoreLayout, clock: SystemClock = SystemClock()) {
         self.layout = layout
+        self.clock = clock
     }
 
     // MARK: Export
+
+    /// **The bundle, in memory.** Every member `docs/technical.md` §8 lists,
+    /// keyed by its bundle-relative path, including `manifest.json`.
+    ///
+    /// This is the one place that decides what a bundle contains.
+    /// ``export(to:at:)`` writes what this returns and adds nothing, and so does
+    /// the settings sheet's export control — which is what makes "the control
+    /// produces the same bundle" a fact about the code rather than a promise two
+    /// call sites keep. Before this existed there was only the disk writer, and
+    /// the only way to give a surface a bundle would have been to write one to a
+    /// temporary directory and read it back.
+    public func bundle(at instant: Date) throws -> ExportBundle {
+        let built = try members(at: instant)
+        var files = built.files
+        files[BundleFile.manifest] = try Exporter.canonicalJSON(built.manifest)
+        return ExportBundle(files: files, exportedAt: instant)
+    }
 
     /// Writes the bundle into `destination`, creating it if needed, and returns
     /// the manifest that was written.
@@ -65,13 +89,32 @@ public struct Exporter: Sendable {
             at: destination, withIntermediateDirectories: true
         )
 
-        var digests: [String: String] = [:]
+        let built = try members(at: instant)
+        for (name, data) in built.files.sorted(by: { $0.key < $1.key }) {
+            try write(data, to: destination, named: name)
+        }
+        try Exporter.canonicalJSON(built.manifest).write(
+            to: destination.appendingPathComponent(BundleFile.manifest), options: .atomic
+        )
+        return built.manifest
+    }
+
+    /// Every member but the manifest, plus the manifest computed over them.
+    ///
+    /// The manifest is returned rather than folded in so ``export(to:at:)`` can
+    /// hand back the typed value its callers already expect, and so the one
+    /// member that digests all the others cannot accidentally be digested by
+    /// itself.
+    private func members(at instant: Date) throws -> (
+        files: [String: Data], manifest: ExportManifest
+    ) {
+        var files: [String: Data] = [:]
 
         // The only truth, byte for byte. Always present, even when empty: a
         // bundle whose shape depends on whether anything has been tapped yet is
         // a bundle whose restore path is untested on day one.
         let events = try Data(contentsOfIfExists: layout.events) ?? Data()
-        digests[BundleFile.events] = try write(events, to: destination, named: BundleFile.events)
+        files[BundleFile.events] = events
 
         // Copied if present. `awards.jsonl` and `attestations.jsonl` arrived in
         // week 3, `anchors.jsonl` in week 4.
@@ -81,10 +124,10 @@ public struct Exporter: Sendable {
             (BundleFile.anchors, layout.anchors),
         ] {
             guard let data = try Data(contentsOfIfExists: source) else { continue }
-            digests[name] = try write(data, to: destination, named: name)
+            files[name] = data
         }
         for (name, data) in try filesInDirectory(layout.rules, prefixedWith: BundleFile.rules) {
-            digests[name] = try write(data, to: destination, named: name)
+            files[name] = data
         }
 
         // Week 4. Both are **derived** from the two files above rather than
@@ -97,12 +140,10 @@ public struct Exporter: Sendable {
         // extracted by code that already understands Compass would be a bundle
         // that still requires trusting Compass.
         for (name, data) in try proofFiles() {
-            digests[name] = try write(data, to: destination, named: name)
+            files[name] = data
         }
         if let pem = try publicKeysPEM() {
-            digests[BundleFile.publicKey] = try write(
-                pem, to: destination, named: BundleFile.publicKey
-            )
+            files[BundleFile.publicKey] = pem
         }
 
         // The name is resolved at render time from a mutable local mapping,
@@ -111,21 +152,18 @@ public struct Exporter: Sendable {
         // frozen into a signed, anchored, shareable record.
         // `docs/technical.md` §5.
         //
-        // Folded out of the *copy just written*, not out of the live store, so a
-        // tap landing mid-export cannot put a habit in `habits.json` that is not
-        // in the `events.jsonl` beside it.
-        let names = try habitNames(loggedAt: destination.appendingPathComponent(BundleFile.events))
-        digests[BundleFile.habits] = try write(
-            try Exporter.canonicalJSON(names), to: destination, named: BundleFile.habits
-        )
+        // Folded out of **the very bytes above**, not out of a second read of
+        // the live store, so a tap landing mid-export cannot put a habit in
+        // `habits.json` that is not in the `events.jsonl` beside it. It used to
+        // re-read the copy just written to disk, which had the same property and
+        // only worked for a bundle that was being written to disk.
+        files[BundleFile.habits] = try Exporter.canonicalJSON(habitNames(logged: events))
 
         let manifest = ExportManifest(
-            exportedAt: Int((instant.timeIntervalSince1970 * 1_000).rounded()), files: digests
+            exportedAt: Int((instant.timeIntervalSince1970 * 1_000).rounded()),
+            files: files.mapValues(Exporter.sha256Hex)
         )
-        try Exporter.canonicalJSON(manifest).write(
-            to: destination.appendingPathComponent(BundleFile.manifest), options: .atomic
-        )
-        return manifest
+        return (files, manifest)
     }
 
     // MARK: Import
@@ -222,8 +260,8 @@ public struct Exporter: Sendable {
     /// `HabitID` -> display name, folded out of the log. Archived habits are
     /// included: a name must stay resolvable for every ID that ever appears in a
     /// record, and archival does not remove the ID from history.
-    private func habitNames(loggedAt url: URL) throws -> [String: String] {
-        let projection = project(try JournalReader(url: url).read().events)
+    private func habitNames(logged events: Data) -> [String: String] {
+        let projection = project(JournalReader.read(events).events)
         var names: [String: String] = [:]
         for (id, habit) in projection.habits {
             names[id.rawValue] = habit.name
@@ -294,7 +332,7 @@ public struct Exporter: Sendable {
             }
     }
 
-    private func write(_ data: Data, to destination: URL, named name: String) throws -> String {
+    private func write(_ data: Data, to destination: URL, named name: String) throws {
         let url = destination.appendingPathComponent(name)
         if name.contains("/") {
             try FileManager.default.createDirectory(
@@ -302,7 +340,6 @@ public struct Exporter: Sendable {
             )
         }
         try data.write(to: url, options: .atomic)
-        return Exporter.sha256Hex(data)
     }
 
     /// Lowercase hex of a file's SHA-256, the form `manifest.json` carries.
@@ -321,6 +358,22 @@ public struct Exporter: Sendable {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
         return try encoder.encode(value)
+    }
+}
+
+// MARK: - The port
+
+extension Exporter: Exporting {
+
+    /// The bundle, stamped with this exporter's clock.
+    ///
+    /// `async` because the port is, and the port is because this reads every
+    /// file in the store and SHA-256s all of them — `docs/technical.md` §6
+    /// measures a full log decode at 865 ms at ten years, and the settings sheet
+    /// runs on the main actor. It is otherwise the same synchronous
+    /// ``bundle(at:)`` every test drives.
+    public func exportBundle() async throws -> ExportBundle {
+        try bundle(at: clock.now())
     }
 }
 

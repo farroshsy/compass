@@ -69,6 +69,7 @@ public final class TodayModel {
     private let absorber: (any EventAbsorber)?
     private let awarding: (any Awarding)?
     private let anchoring: (any Anchoring)?
+    private let exporting: (any Exporting)?
 
     /// The launch cache the first frame was rendered from, or `nil` once the
     /// replay has landed — and `nil` from the start on a launch that read the
@@ -105,6 +106,7 @@ public final class TodayModel {
         absorber: (any EventAbsorber)? = nil,
         awarding: (any Awarding)? = nil,
         anchoring: (any Anchoring)? = nil,
+        exporting: (any Exporting)? = nil,
         isStoreAvailable: Bool = true
     ) {
         let today = clock.today(cutoffHour: DayBoundary.cutoffHour)
@@ -125,6 +127,7 @@ public final class TodayModel {
         self.absorber = absorber
         self.awarding = awarding
         self.anchoring = anchoring
+        self.exporting = exporting
         self.isStoreAvailable = isStoreAvailable
     }
 
@@ -147,6 +150,7 @@ public final class TodayModel {
             absorber: store.absorber,
             awarding: store.awarding,
             anchoring: store.anchoring,
+            exporting: store.exporting,
             isStoreAvailable: store.isStoreAvailable
         )
     }
@@ -544,6 +548,35 @@ public final class TodayModel {
         }
         subject.apply(event)
         return true
+    }
+
+    // MARK: Export
+
+    /// Builds the export bundle for the settings sheet's export control.
+    ///
+    /// **This is the call that makes `docs/product.md`'s mission sentence
+    /// reachable.** "A record … which you can hand to a stranger" requires a way
+    /// to hand it over, and until 2026-08-01 there was none: `Exporter` shipped
+    /// in week 1, was tested from week 1, and was called by nothing outside its
+    /// own test file. Every bundle this project has ever verified was produced by
+    /// a helper written beside the app rather than by the app.
+    ///
+    /// It returns an outcome rather than throwing, and rather than being silent,
+    /// because export is the one operation here the user explicitly asked for.
+    /// A tap that quietly does nothing is the failure mode `isStoreAvailable`
+    /// exists to prevent on Today, and it would be worse on a control whose whole
+    /// purpose is producing a file.
+    ///
+    /// **It does not write anything.** The bytes go to `fileExporter`, which owns
+    /// the destination — the app never learns where the user put it, and never
+    /// asks for a folder permission it would otherwise have to explain.
+    public func export() async -> ExportOutcome {
+        guard let exporting else { return .failed(SettingsCopy.exportUnavailable) }
+        do {
+            return .ready(try await exporting.exportBundle())
+        } catch {
+            return .failed(SettingsCopy.exportFailed(reason: "\(error)"))
+        }
     }
 
     /// Records one event off the tap path, on the same terms as ``toggle``: the

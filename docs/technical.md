@@ -1152,10 +1152,25 @@ fake clock, all running in milliseconds:
     the claim re-derived from the log, the recomputed evidence root, the P-256
     signature, and the digest the anchor commits to. Two independent
     implementations agreeing is the only form of evidence available for a byte
-    format, since a single implementation can only ever agree with itself. Two of
-    its four cases are **negative**: an edited event is caught, and an edited
-    event with the manifest rewritten to match is still caught — by the chain and
-    by the claim, which is where the guarantee actually lives.
+    format, since a single implementation can only ever agree with itself. Three
+    of its seven cases are **negative**: an edited event is caught, an edited
+    event with the manifest rewritten to match is still caught, and an inflated
+    claim is caught — by the chain and by the claim, which is where the guarantee
+    actually lives.
+
+    **A fourth kind of case was added on 2026-08-01, and it is the one this list
+    was missing: a fixture built so that two plausible readings of the
+    specification give different answers.** Every bundle the other six cases
+    produce is appended in day order by one writer, so day order and
+    `(lamport, device)` order coincide and a verifier sorting the evidence leaves
+    by either reaches the same root. `verifier/compass-verify.py` sorted by day
+    and passed all six. `evidenceLeavesAreInTotalOrderNotDayOrder` builds a log
+    two writers appended out of day sequence — which is the ordinary shape once
+    the widget exists — computes both candidate roots from
+    `docs/achievement-protocol.md` §4.1's own primitives, asserts that they
+    differ, and then asserts which one each implementation reached. Agreement
+    that only holds on tidy data is not agreement, and only a fixture that can
+    tell two orders apart can show the difference.
 
 Deliberately not written, and say so out loud rather than feeling guilty:
 SwiftUI snapshot tests (break on every point release, catch nothing a daily user
