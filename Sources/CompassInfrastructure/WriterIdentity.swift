@@ -17,8 +17,24 @@ import Foundation
 /// `lamport` sequence and its own `prev` chain. `docs/technical.md` §4.
 public struct WriterIdentity: Sendable {
 
-    /// The app process. The widget adds a second name in week 2.
+    /// The app process.
     public static let app = "app"
+
+    /// **The widget process — the second writer, shipped with the widget in week
+    /// 2 rather than after it.** `docs/technical.md` §4.
+    ///
+    /// It is a *name*, not an identity: the identity is the UUID minted behind
+    /// it, in this store, on this writer's first write. Two names mean two files
+    /// (``StoreLayout/writerIdentity(_:)``), two UUIDs, two `lamport` sequences
+    /// and two `prev` chains — which is what `witness.logHeads` is shaped for and
+    /// what ADR 0002 chose over one global chain, precisely because concurrent
+    /// appenders fork a global one.
+    ///
+    /// The name must never be reused for a third writer and must never be
+    /// changed: changing it mints a fresh UUID, which restarts a `lamport`
+    /// sequence at 1 and a chain at genesis while the old chain's head is still
+    /// under every `logHeads` ever written.
+    public static let widget = "widget"
 
     private let layout: StoreLayout
     private let url: URL
@@ -40,16 +56,47 @@ public struct WriterIdentity: Sendable {
     /// journal needs the identity to open — so it cannot assume someone else has
     /// already created the directory. On a genuinely fresh install nobody has,
     /// and the same is true of the widget process in week 2.
+    ///
+    /// ### The mint is taken under the advisory `flock`, and the read is not
+    ///
+    /// A writer *name* is not a process. The app has exactly one process, but iOS
+    /// may run several widget extension instances at once, and every one of them
+    /// is `WriterIdentity.widget` — so on the first press after an install, two
+    /// processes can reach the mint together. Left unlocked they each generate a
+    /// UUID, each write it, and one file survives: the loser then records under a
+    /// `device` that no later launch will ever recover, so a phone grows a third
+    /// writer that existed for one press and appears forever in the `logHeads` of
+    /// every achievement sealed afterwards. Nothing is corrupted — per-writer
+    /// chains verify independently, which is exactly why this is worth a lock
+    /// rather than a panic — but a signed record should not carry a writer that
+    /// was an accident.
+    ///
+    /// So the mint happens under the same cross-process lock
+    /// `docs/technical.md` §4 already specifies for read-then-write, and the
+    /// existence check is repeated inside it because another process may have
+    /// minted between the two.
+    ///
+    /// The **fast path takes no lock at all**: once the file exists this is one
+    /// read, which is what every launch after the first does.
     public func load() throws -> DeviceID {
-        if let data = try? Data(contentsOf: url),
-           let text = String(data: data, encoding: .utf8) {
-            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !trimmed.isEmpty { return DeviceID(rawValue: trimmed) }
-        }
+        if let stored = stored() { return stored }
 
         try layout.prepare()
-        let minted = UUID().uuidString
-        try Data(minted.utf8).write(to: url, options: .atomic)
-        return DeviceID(rawValue: minted)
+        return try EventJournal.withExclusiveLock(onFileAt: layout.events) {
+            if let stored = stored() { return stored }
+            let minted = UUID().uuidString
+            try Data(minted.utf8).write(to: url, options: .atomic)
+            return DeviceID(rawValue: minted)
+        }
+    }
+
+    /// The identity already on disk, or `nil`. Returned verbatim — never
+    /// regenerated, never normalised.
+    private func stored() -> DeviceID? {
+        guard let data = try? Data(contentsOf: url),
+              let text = String(data: data, encoding: .utf8)
+        else { return nil }
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : DeviceID(rawValue: trimmed)
     }
 }

@@ -14,9 +14,18 @@ your own numbers in it.
 overstates.** A stranger recomputes the canonical bytes, checks the SHA-256,
 checks the P-256 signature, and checks the OpenTimestamps proof against Bitcoin
 headers — the procedure is in `docs/adr/0004`. That is only actually achievable
-if there is something to run. So a **~200-line standalone verifier ships in this
-repository in week 4**, and `docs/achievement-protocol.md` §6 and §9 are
-published verification procedure rather than private internals.
+if there is something to run. So a **standalone verifier ships in this
+repository**, and `docs/achievement-protocol.md` §6 and §9 are published
+verification procedure rather than private internals.
+
+**It shipped on 2026-08-01**, as `verifier/compass-verify.py`: Python 3, standard
+library only, no dependency on the app and no code shared with it. It was
+estimated at ~200 lines and came out at 579, because re-deriving the claim from
+the log and doing P-256 by hand were not in the estimate. It has been run against
+a real exported bundle. One honest limit, and the verifier prints it on every
+run: checking a Bitcoin *header* needs a chain the script does not ship, so it
+reports the block height and the merkle root and says it did not take the last
+step.
 
 This does not reopen the non-goal below. The protocol acquires no second
 *implementer* — nobody builds a product against it. It gains a second *reader*,
@@ -335,6 +344,9 @@ The concrete mechanics, each of which appears again in the technical documents:
   a `manifest.json` of per-file digests. The exact list is in
   `docs/technical.md` §8 and it is stated identically there, in
   `docs/adr/0002` and in `memory/next-tasks.md` so the copies cannot drift.
+
+  `anchors.jsonl` — the weekly log-head anchors — joined that list in week 4,
+  in the same change that first wrote one.
 
   This was previously defined as "newline-delimited canonical JSON of the whole
   log" — that is `events.jsonl` alone, which contains neither the achievement

@@ -54,6 +54,7 @@ One event per line, appended to an open file descriptor.
 Group/events.jsonl        the only truth
 Group/awards.jsonl        immutable achievement and revocation records
 Group/attestations.jsonl  mutable, last-write-wins per achievement ID
+Group/anchors.jsonl       week 4: the weekly log-head anchors and their proofs
 Group/snapshot.json       cache. Deletable. Never the source of anything.
 ```
 
@@ -89,7 +90,7 @@ that licenses destroying the least protected data in the project.
 | Tier | Files | Why |
 |---|---|---|
 | **Irreplaceable** | `events.jsonl`, `awards.jsonl` | Events are the only truth. Awards are recorded as facts with a frozen rule copy precisely so recomputation under changed rules cannot un-award something already anchored — so recomputing them is not the same operation as reading them. |
-| **Irreplaceable in part** | `attestations.jsonl` | `otsProof`, `signature`, `publicKey` and `chain` are not recomputable. A deleted-and-resubmitted OTS proof yields a strictly *later* Bitcoin timestamp, destroying the "it is not backdated" property that ADR 0004 calls the entire argument for the pairing. The signature is unrecomputable once the enclave key is gone. `ChainRecord` is the only thing making ADR 0001's chain-death insurance work. Only `state` and the timestamps here are recomputable. |
+| **Irreplaceable in part** | `attestations.jsonl`, `anchors.jsonl` | `otsProof`, `signature`, `publicKey` and `chain` are not recomputable. A deleted-and-resubmitted OTS proof yields a strictly *later* Bitcoin timestamp, destroying the "it is not backdated" property that ADR 0004 calls the entire argument for the pairing. The signature is unrecomputable once the enclave key is gone. `ChainRecord` is the only thing making ADR 0001's chain-death insurance work. Only `state` and the timestamps here are recomputable. `anchors.jsonl` is in this tier for the same single reason: its heads are recomputable from the log at any moment and its **proof is not**. |
 | **Disposable** | `snapshot.json`, the projection, every derived table | Delete freely. |
 
 The two consequences that motivated the original wording still hold — for the
@@ -162,9 +163,9 @@ robust even if the absolute figures shift.
   than an integer ordinal specifically to preserve this; the ordinal is an
   internal arithmetic detail.
 - Export ships in week one and is a **bundle, not a log dump**: `events.jsonl` +
-  `awards.jsonl` + `attestations.jsonl` + the frozen rule JSON + `habits.json` +
-  the P-256 public keys + every `.ots` proof + a `manifest.json` of per-file
-  digests. Stated in these words here, in `docs/product.md`,
+  `awards.jsonl` + `attestations.jsonl` + `anchors.jsonl` (added in week 4, with
+  the first log-head anchor) + the frozen rule JSON + `habits.json` + the P-256
+  public keys + every `.ots` proof + a `manifest.json` of per-file digests. Stated in these words here, in `docs/product.md`,
   `docs/technical.md` §8 and `memory/next-tasks.md` so the four copies cannot
   drift. Exporting `events.jsonl` alone would omit both the achievement records
   and the Bitcoin proofs — the two things the export is claimed to preserve. It

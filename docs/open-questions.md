@@ -216,6 +216,38 @@ point named rather than settled now.
   Written as 30 in `docs/achievement-protocol.md` §7.2. That is a proposal, not
   a measured figure, and per the standing evidence rules it is labelled as one.
   **Decision point:** after the first real anchor failure, if there is one.
+  *(Week 3 built the slot and the copy — `CertificateCopy.anchoringDidNotComplete`
+  — so N is now one constant with a test behind it rather than a sentence.)*
+- **Whether a habit added in the settings sheet can earn a streak certificate.**
+  It cannot today: a rule is static data and `Scope.habit` is a `HabitID`, so the
+  shipped streak rows name the four seeded identifiers and a habit minted at
+  runtime matches none of them. `docs/technical.md` §5 says "per habit at 7, 30,
+  100, 365 and 1000 consecutive days" and `docs/product.md` allows adding habits;
+  nothing reconciles the two, and week 3 did not invent a reconciliation. The
+  mechanism needs no new concept — `RuleStore` already reads the store's own
+  `rules/` directory, so writing a per-habit row there at `habitCreated` is the
+  whole fix. **Decision point:** the first time a habit is added and kept for a
+  week. It is a product question, not an engineering one.
+- **Whether "all three calendars" should mean three independent operators.**
+  ADR 0004's first mitigation reads "three independent chances to upgrade", and
+  the first real submission on 2026-08-01 showed it buys **two**:
+  `a.pool.opentimestamps.org` is a pool and routed to
+  `alice.btc.calendar.opentimestamps.org`, so the returned proof carried two
+  pending attestations naming alice and one naming bob. The submission code is
+  correct and asks all three; what is weaker than stated is the redundancy.
+  Replacing the pool with a third independent operator is one line in
+  `Calendars.defaults` — the question nobody has asked is whether a third
+  independent operator exists, is stable, and is worth depending on more than a
+  pool that fronts several. **Decision point:** before anyone quotes "three
+  independent chances" as a durability guarantee. `memory/known-bugs.md`.
+- **The AX5 seal size, at 120pt on the shipped 64-cell device.** The
+  "holds to 160pt, merges at 120pt" finding was measured on the superseded 4 x 7
+  device; the shipped one is more than twice as dense and its cell falls to
+  6.14pt. Rendered and looked at on the simulator on 2026-08-01 — the cells stay
+  separated, but the field reads as texture rather than as data. **Decision
+  point:** a look on a physical phone at arm's length. Keeping 120 is the
+  design's answer; raising the floor to 168 costs nothing, because at AX5 the
+  screen already scrolls and the attestation has already unstacked.
 
 ---
 

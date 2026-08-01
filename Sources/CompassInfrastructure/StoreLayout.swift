@@ -41,11 +41,35 @@ public struct StoreLayout: Hashable, Sendable {
     /// are not recomputable. Written from week 4.
     public var attestations: URL { storeURL.appendingPathComponent("attestations.jsonl") }
 
+    /// The weekly log-head anchors. `docs/adr/0004`, week 4.
+    ///
+    /// Irreplaceable in part, on exactly the same grounds as ``attestations``:
+    /// the heads are recomputable from the log, and the **proof over them is
+    /// not**. Re-submitting a discarded anchor gets a strictly later Bitcoin
+    /// timestamp, which destroys the one property the anchor exists to provide.
+    ///
+    /// It is its own file rather than a shape inside `attestations.jsonl`
+    /// because that file is keyed by `AchievementID` and a log head is not an
+    /// achievement — putting one in there would mint a fake achievement
+    /// identifier to file it under.
+    public var anchors: URL { storeURL.appendingPathComponent("anchors.jsonl") }
+
     /// Rule JSON, hot-reloadable. Written from week 3.
     public var rules: URL { storeURL.appendingPathComponent("rules", isDirectory: true) }
 
     /// Disposable. Delete freely; the replay always wins.
     public var snapshot: URL { storeURL.appendingPathComponent("snapshot.json") }
+
+    /// The log as it stood before the one-time `reproject` hatch computed
+    /// `content_hash` and `prev` for the first time. `docs/technical.md` §11.
+    ///
+    /// Irreplaceable while it exists, and never overwritten once written: it is
+    /// the only copy of what week 1a actually recorded, and the hatch that
+    /// creates it is the single operation in this codebase that rewrites the
+    /// only truth.
+    public var preChainEvents: URL {
+        storeURL.appendingPathComponent("events.jsonl.pre-chain")
+    }
 
     /// Where one writer's `DeviceID` is remembered.
     ///

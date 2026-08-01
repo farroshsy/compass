@@ -2,7 +2,9 @@
 
 **As of 2026-08-01.**
 
-> ## Week 1a shipped. The app builds, installs and runs.
+> ## Weeks 1a, 1b, 2, 3 and 4 shipped. The app builds, installs and runs, it has
+> ## an interactive Home Screen widget and a second writer, it issues and signs
+> ## certificates, and it anchors them to Bitcoin through OpenTimestamps.
 >
 > **If you are a new session: do not start anything from scratch.** There is a
 > Swift package, an Xcode project, an app that launches, and a test suite that
@@ -10,6 +12,13 @@
 > that believed it would have rebuilt what already exists — which is the exact
 > failure `PROJECT_CONSTITUTION.md` §5 exists to prevent, invited by the corpus
 > itself.
+>
+> **The encoding is frozen, and now irreversibly.** `content_hash`, the canonical
+> bytes and per-writer `prev` chaining are on disk in the real log; the one-time
+> `reproject` hatch has been used and is spent; and **week 3 signed something**,
+> which is the moment §11 says that hatch closes for good. Do not "improve" the
+> canonical form, in either document — see `docs/technical.md` §3,
+> `docs/achievement-protocol.md` §6, and `.claude/skills/architecture.md`.
 
 ## Where the project actually is
 
@@ -17,7 +26,7 @@ Measured on this machine on 2026-08-01, by running the commands, not by reading
 another document.
 
 ```
-swift test          -> 218 tests in 23 suites passed
+swift test          -> 482 tests in 46 suites passed
 git rev-list --count HEAD   -> run it; a number written here is wrong by the
                                commit that writes it
 ```
@@ -53,58 +62,215 @@ row with `Color.primary.opacity(0.06)`. Colour appears on the first check.
   root and holds nothing else.
 - **Domain:** `Day` as an integer ordinal, `Event`, `project()` as a pure fold,
   `Projection` with `habitCap = 4`, `Identifiers`, `JSONValue`, `Ports`,
-  `Attestation`, `ComposedStore`.
-- **Infrastructure:** `EventJournal` appending JSON Lines to an open
-  `FileHandle`, `StoreLayout`, `SystemClock` with the 04:00 boundary,
-  `WriterIdentity`, `Export`, and `AppComposition` — which seeds the four habits
-  as `habitCreated` events on a first launch and, when the store cannot be
-  opened, returns an `UnavailableStore` rather than refusing to launch.
+  `Attestation`, `ComposedStore`, and from week 1b `CanonicalBytes`,
+  `EventChain` and `TodaySnapshot`.
+- **Infrastructure:** `EventJournal` appending one `write(2)` per event to an
+  `O_APPEND` descriptor, `StoreLayout`, `SystemClock` with the 04:00 boundary,
+  `WriterIdentity`, `Export`, and from week 1b `EventLog`, `SnapshotStore` and
+  `Reproject`; plus `AppComposition` — which seeds the four habits as
+  `habitCreated` events on a first launch and, when the store cannot be opened,
+  returns an `UnavailableStore` rather than refusing to launch.
 - **UI:** `TodayView`, `HabitRow`, `SpineView`, `TodayModel`, `TodayMetrics`,
-  `TodayCaption`, `HabitTint`, and the settings sheet — `SettingsView`,
-  `SettingsEdits`, `SettingsCopy`.
+  `TodayCaption`, `HabitTint`, the settings sheet — `SettingsView`,
+  `SettingsEdits`, `SettingsCopy` — and from week 3 the certificate:
+  `CertificateView`, `CertificateDocument`, `CertificateExport`, `SealView`,
+  `CertificateCopy`, `CertificateMetrics`.
 - **The settings sheet arrived in week 1a, ahead of the plan**: add, remove
   (archives, never deletes), restore, rename in place, and the optional declared
   name on the record. `docs/technical.md` §11 now records that it landed early.
-- The Record app icon, and the week-3 seal assets vendored in `Assets/seal/`.
+- The Record app icon; the seal die frames in `Sources/CompassUI/SealFrames/`,
+  vendored from `Assets/seal/`. **`Assets/seal/reference/matrix-*` are comparison
+  renders of one particular record and must never be linked into a target** —
+  `SealTests` reads the source tree to enforce that, because the bundle-only
+  version of the check passed with a render sitting in the repository.
+
+### What week 1b added, 2026-08-01
+
+- **`CompassDomain/CanonicalBytes.swift`** — the hand-written canonical byte
+  encoder, the eleven values `docs/technical.md` §3 freezes in that exact order,
+  and `content_hash` as SHA-256 over them, recomputed on read and never stored.
+  `payload` is inside the digest, per kind, closed. `extra` and unknown top-level
+  keys are outside it and always will be.
+- **`CompassDomain/EventChain.swift`** — per-writer chain verification, heads,
+  and breaks. Never one global chain; ADR 0002 rejects that.
+- **`CompassDomain/TodaySnapshot.swift`** — the disposable launch cache, its
+  roll-forward to a later day, and the rehydration that gives the first frame a
+  projection. It carries **no `lamport`, no head and no `device`**, on purpose.
+- **`CompassInfrastructure/EventJournal.swift`** — `prev` computed from this
+  writer's head, `WriterResume` recovering `lamport` and the head together under
+  the advisory `flock`, and canonicalisation **before** the write so a refused
+  event never reaches the file.
+- **`CompassInfrastructure/Reproject.swift`** — the one-time hatch. **It has been
+  used.** The real log now chains and `events.jsonl.pre-chain` holds the
+  original.
+- **`CompassInfrastructure/EventLog.swift`** — `actor EventLog` and
+  `SnapshotStore`. §4 line 4 is wired: `Task { await absorber.absorb(event) }`.
+- **The App Group container**, `group.dev.farros.compass`, with the one-time file
+  move that renames rather than deletes the old store.
+
+Verified on the simulator against the real week-1a log: the store moved, the
+hatch ran, the chain verifies, and a **Python verifier written from
+`docs/technical.md` §3 alone** — sharing no code with the app — reproduces every
+`content_hash` and every link, including after a live tap.
+
+### What week 2 added, 2026-08-01
+
+- **`CheckIn.toggle` — one append API for two writers.** It decides the kind,
+  attaches the `source` the kind is entitled to and the closed payload, and
+  records. `TodayModel.toggle` passes `.tap`; the widget passes `.widget`. Nothing
+  else differs, and nothing else may.
+- **`WriterIdentity.widget` and `CompassInfrastructure/WidgetStore.swift`** — the
+  second writer's whole path into the store: read the log to draw, record one
+  check-in, rewrite the disposable cache. It never migrates, reprojects or seeds,
+  because §4 says only the app process rewrites.
+- **`Widget/`** — a shell holding `ToggleHabitIntent`, a timeline provider and a
+  view, in exactly the sense `App/` is a shell. One `.systemSmall` family, a
+  `StaticConfiguration`, and a timeline whose entire refresh policy is the next
+  04:00.
+- **`Tests/.../TwoWritersTests.swift` and `CompassLogWriter`** — §9.10 with two
+  real processes. It found a real defect on the day it was written.
+- **The `lamport` fix.** A writer now resumes from the highest `lamport` in the
+  whole log rather than its own. `memory/decisions.md` has the un-check that was
+  being silently discarded.
+- `TodayView` reconciles on `.task(id: scenePhase)`; both targets carry matching
+  version keys; `HabitTint` is public so the two surfaces share one palette.
+
+Verified on the simulator: the extension is embedded, entitled to
+`group.dev.farros.compass`, registered with WidgetKit, and its provider renders
+the four real habits from the shared log. **The press is not verified** — see
+`memory/known-bugs.md`.
+
+### What week 3 added, 2026-08-01
+
+- **`CompassDomain/RuleSpec.swift`, `Achievement.swift`, `EvidenceRoot.swift`,
+  `AchievementEngine.swift`** — rules as data, the record's seven fields, the
+  Merkle construction §4.1 freezes, and the engine as a pure, idempotent,
+  re-runnable function of the log. Two evaluator kinds; four named and skipped.
+- **The achievement canonical form**, in the same file the event one lives in,
+  with its own hardcoded digest hex transcribed from `docs/achievement-protocol.md`
+  §6 by hand and hashed by two tools outside this project.
+- **`CompassInfrastructure/Signer.swift`** — copied from the `before` repository
+  with both §8 fixes and without `sign(_ text:)`, which double-hashes.
+  `KeychainStore` persists the enclave key under
+  `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`.
+- **`AwardStore` and `AchievementIssuer`** — `awards.jsonl` append-only with no
+  deletion path in any state, `attestations.jsonl` last-write-wins on read, and
+  the guarded step that records an earned achievement as a fact and seals it in
+  the same pass.
+- **`CompassUI/CertificateMetrics.swift`, `CertificateCopy.swift`,
+  `SealView.swift`, `CertificateView.swift`** — surface 2, full-bleed paper, no
+  colour at all, the claim on the `largeTitle` metric, the seal struck from the
+  first 64 bits of `witness.evidenceRoot`, the full digest printed, and the AX5
+  structural variant.
+- **The certificate list** in the settings sheet, which re-presents the same
+  certificate rather than pushing a fourth surface.
+
+Verified on the simulator against a real chained 32-day history: four awards
+backfilled with `earnedOn` on the historical day, each signed and verifying, each
+`sealed` and saying nothing about anchoring, the seal drawn from that record's own
+evidence root, and the list re-opening any of them. Twenty mutations were run
+against it; every one was caught.
+
+### What week 4 added, 2026-08-01
+
+- **`CompassInfrastructure/Calendars.swift`** — copied from the `before`
+  repository with its **first-success-wins behaviour fixed during the copy**. A
+  digest goes to all three calendars concurrently and every answer is kept.
+- **`CompassInfrastructure/OpenTimestamps.swift`** — the proof format, read and
+  written by hand. Needed because holding three responses in one artifact and
+  asking a calendar for an upgrade both require the format itself. Parsing
+  applies nothing, so a proof carrying an operation this build cannot compute is
+  still read in full, reported, and re-emitted unchanged.
+- **`CompassInfrastructure/Anchoring.swift`** — `AnchorPipeline` (upgrade what is
+  pending, anchor the log head when a week is up, submit what the 72-hour window
+  has released) and `OpenTimestampsAttestor` behind the `Attestor` port. **A pass
+  with nothing due makes no request at all**, which is what makes it safe on
+  every foreground.
+- **`anchors.jsonl`, `LogAnchor` and a third canonical form** — ADR 0004
+  mandated weekly log-head anchoring and specified no shape, so one is fixed in
+  `docs/technical.md` §6. No timestamp in it, deliberately.
+- **`CompassInfrastructure/AnchorScheduler.swift`** — the `BGProcessingTask`
+  half, plus the launch drain in `TodayModel.reconcile()`. Both, per §9.8. The
+  simulator log confirms registration and submission:
+  `submitTaskRequest: <BGProcessingTaskRequest: dev.farros.compass.anchor …>`.
+- **`verifier/compass-verify.py`** — the standalone verifier. Python 3, standard
+  library only, no shared code with the app.
+- `Exporter` now writes `proofs/*.ots` and `publickey.pem`, which §8 had always
+  listed and nothing had produced.
+
+**Verified against the real calendars.** The app on the simulator computed the
+log head, digested it to
+`33a6fc1429640437cf9711e800e9a3fe46c873407eaa8f53f44c2b4e2361d106`, and submitted
+it to all three. **That digest had already been computed, hours earlier, by the
+Python verifier reading `events.jsonl` alone** — two programs, no shared code,
+same answer. The bundle exported from that store passes every check the verifier
+can run.
+
+**The certificate gained one line and nothing else in the app changed.** The line
+and its tests already existed from week 3; week 4 built the only thing that can
+reach `confirmed`.
 
 ### What does not exist yet
 
-No canonical byte encoding, no `content_hash`, no `prev` chaining, no App Group,
-no `actor EventLog`, no snapshot cache, no widget, no rule specs, no achievement
-engine, no `CertificateView`, no signing, no anchoring, no standalone verifier.
-All of that is week 1b and later, and all of it is listed in
-`memory/next-tasks.md`.
+**The app's own proof has not reached a Bitcoin block yet — but the digest has.**
+Block **960500** commits the log-head digest `33a6fc14…`, via a proof submitted by
+hand thirty-three minutes before the app's while the canonical form was being
+pinned. The app's own submission landed in a later aggregation round. Same digest,
+different path, and only the app's path is in `anchors.jsonl` — so one inch is
+unexercised, `AnchorPipeline.upgradeAll` writing `confirmed` from a real upgrade
+response. **Open the app again and it clears.** The four real achievements are
+still inside their 72-hour window, so only the log head is anchored at all.
+
+No damaged-log *notice* — the damage is detected and reported in
+`JournalRead.chain`, and nothing renders it. **No export surface**, which now
+costs more than it did: the verifier takes a bundle, so the artifact that makes
+the mission sentence true is reachable only from a Mac with this repository. No
+scheduled iCloud Drive backup, which needs the button first. All of it is in
+`memory/next-tasks.md` and `memory/known-bugs.md`.
 
 ## What the next session should do
 
-**Week 1b — the canonical encoding and the hash chain.** `docs/technical.md` §11
-and `memory/next-tasks.md`.
+**Put the app on the phone and use it.** That is still the one unticked item of
+week 1a, and it is the thing that keeps the project alive.
 
-> **Entry condition, verbatim from `docs/technical.md` §11: the app has been
-> opened three days running.** Not before.
+> **Week 1b's entry condition — the app opened three days running — was waived
+> by the owner on 2026-08-01, not met.** `memory/decisions.md` has the waiver and
+> what it costs. `docs/technical.md` §11 keeps the gate as written.
 
-**That condition is not met, and nothing in this repository says it is.** Week 1a
-ends with *"Install on the phone. Use it."* — that item is unticked, and no
-entry in `memory/decisions.md` records the app ever being on a phone. What has
-been demonstrated is a simulator install, which is a build check, not three days
-of use. So the honest next action is not code:
+What that cost, stated exactly: the `reproject` hatch was the mitigation §11
+provided for exactly this, and it is now **spent**. It closes for good at the
+first signature, which is week 3. So the encoding can no longer be revised by
+replaying the log — if the canonical form is wrong, it is wrong permanently once
+week 3 lands. The four high-severity defects found on 2026-07-31 were all cases
+of the app asserting something untrue and none was caught by a green suite; real
+use is still the detector that has not run.
 
 1. **Put the app on the phone and open it for three days.** A free provisioning
-   profile is acceptable for this — it expires after seven days, which is fatal
-   to a habit but not to a three-day entry condition.
+   profile is acceptable — it expires after seven days, which is fatal to a habit
+   but not to a three-day condition. Note the App Group entitlement: a free
+   profile may not carry it, and `AppComposition.storeURL` falls back to
+   Documents, which is fine until the widget.
 2. **Start the paid Apple Developer enrolment in parallel** if it has not been
-   started. Individual verification takes days and it blocks nothing until the
-   app goes on the phone to stay.
-
-If week 1b is started before the app is in daily use, the ordering rule in
-`docs/technical.md` §11 — *the daily loop must be in daily use before anything
-cryptographic is built* — has been broken, and the thing that keeps the project
-alive was skipped for the thing that is more interesting to build. That is the
-whole reason the split exists.
-
-**The one-time `reproject` hatch is still open** and is what makes waiting safe:
-the week-1a log can be replayed once into a freshly chained log. It closes the
-moment anything is signed, which cannot happen before week 3.
+   started. Individual verification takes days.
+3. **Week 2 is done.** The widget, the second writer identity and the adversarial
+   two-process test all landed on 2026-08-01, and the test found the `lamport`
+   ordering defect the same day — so "every test in the suite would pass while
+   real data corrupts" turned out to be literally true, and is now false. What is
+   still owed from week 2 is one thing and it needs a phone: **add the widget to
+   the Home Screen and press a row.** `memory/known-bugs.md`.
+4. **Week 3 is done**, and with it the `reproject` hatch is closed for good.
+   Three things are owed from it, all in `memory/known-bugs.md`: a look at the
+   120pt AX5 seal on a physical phone, a decision about whether a habit added in
+   the settings sheet can earn a streak certificate, and the `nameFooter` claim
+   the seal has now earned.
+5. **Week 4 is done.** What is owed from it needs only time and a phone: open
+   the app again tomorrow and watch a proof reach a Bitcoin block, and again
+   after 2026-08-04, when the four real achievements leave their 72-hour window
+   and become the first records anchored for their own sake rather than through
+   the log head.
+6. **Then the export button.** It is the smallest remaining piece of week 1b, it
+   is what the scheduled iCloud Drive backup has to be built on, and it is what
+   makes the verifier reachable by the person the record is about.
 
 ## Outstanding, and not blocking week 1b
 
@@ -114,7 +280,12 @@ moment anything is signed, which cannot happen before week 3.
   and the whole log.
 - **Measurements owed** under the standing evidence rules: cold launch to first
   frame, and full replay time, both on the actual phone. 400 ms and 250 ms are
-  proposals and must not be written into a test as fact.
+  proposals and must not be written into a test as fact. Week 1b adds a third:
+  the cost of the **first tap of a process that launched from the snapshot
+  cache**, which recovers its resume under the `flock` and therefore decodes the
+  log once. §4 wants that in microseconds; `EventLog.replay()` normally primes it
+  first, but a tap can beat the replay and nothing has measured that race on a
+  real device.
 - **`PROJECT_CONSTITUTION.md` §14 is still unresolved** — wallet recovery versus
   the invisibility rule. It must be resolved before contract work begins, and it
   is a design blocker, not a product one. §3 settles that the chain ships; what
@@ -148,3 +319,10 @@ correct-but-requires-a-rewrite.
   `docs/product.md`. A fourth means editing that list first.
 - Do not re-argue anything in `memory/decisions.md`. Overturn it in writing,
   with a date and a reason, or leave it alone.
+- **Do not touch the canonical byte encoding.** `CompassDomain/CanonicalBytes.swift`
+  is the only place it exists and `CanonicalBytesTests` pins it to a hex computed
+  outside this project. If that test needs updating, something irreversible has
+  happened — stop and find out what.
+- **Do not re-run the `reproject` hatch to repair a chain that breaks later.** It
+  has been used. A later break is damage to report under `docs/technical.md` §6,
+  not a `prev` to recompute.

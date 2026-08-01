@@ -110,6 +110,15 @@ Required mitigations, all cheap:
 
 - **Submit to all three calendars, not first-success-wins.** Three independent
   chances to upgrade, for the same zero marginal cost.
+  - **Implemented in week 4, and the first real submission measured something
+    this ADR had assumed.** The proof came back with two pending attestations
+    naming `alice.btc.calendar.opentimestamps.org` and one naming `bob` —
+    because `a.pool.opentimestamps.org` is a **pool**, and it routed the
+    submission to alice. So three submissions bought **two** independent
+    operators, not three. The code is unchanged and correct: it asks all three.
+    What is weaker than this bullet claimed is the redundancy that buys, and it
+    is stated rather than left as an assumption nobody had checked.
+    `memory/known-bugs.md`, 2026-08-01.
 - **Persist every pending proof** in `attestations.jsonl`, which is in the
   irreplaceable-in-part tier per ADR 0002.
 - **Upgrade aggressively and keep re-attempting over a long horizon** — months,
@@ -147,6 +156,13 @@ something meaningful. Until weekly log-head anchoring exists, the UI MUST NOT
 imply that a backfilled achievement is proven to have occurred when it says it
 did.
 
+**Weekly log-head anchoring shipped on 2026-08-01**, in `anchors.jsonl`, with its
+canonical form fixed in `docs/technical.md` §6 because this document mandated the
+work without giving it a shape. Unchanged heads are never re-anchored: the form
+carries no timestamp, so the digest would be identical and a second submission
+would buy a strictly later Bitcoin timestamp for a value that already has an
+earlier one.
+
 **This corollary fires immediately, which is why weekly anchoring is week-4 work
 and not a deferred item.** The engine backfills over existing history with
 `earnedOn` set to the historical day, and the rule set starts at 7 consecutive
@@ -173,9 +189,17 @@ is the one failure this apparatus exists to prevent.
 - Verification for someone handed the exported bundle: recompute the canonical
   bytes, check the SHA-256, check the P-256 signature, check the OpenTimestamps
   proof against Bitcoin headers. No chain access required, and no trust in the
-  app or its author at any step. A ~200-line standalone verifier ships in the
-  repository in week 4 so this procedure is runnable rather than merely
-  described.
+  app or its author at any step. **That verifier shipped on 2026-08-01** as
+  `verifier/compass-verify.py` — Python 3, standard library only, no shared code
+  with the app — so this procedure is runnable rather than merely described.
+  - **What it does not do, stated because this bullet says "against Bitcoin
+    headers" and it does not have any.** It replays every operation in the proof,
+    reports each pending calendar as a promise, and reports each Bitcoin
+    attestation with its block height and the merkle root the operations arrive
+    at. Confirming that root really is that block's needs a Bitcoin node or a
+    header chain, and shipping either inside the verifier would be a larger act
+    of trust than the one it removes. It prints the height and the root so the
+    last step can be taken by hand, and it says out loud that it did not take it.
   - **What a verifier cannot conclude:** display text outside the digest —
     `titleKey`, `fallbackTitle`, `extra`, `detectedAt` — is attacker-controllable
     on a received bundle while the signature still verifies. Titles are rendered

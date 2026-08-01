@@ -109,7 +109,15 @@ public enum TodayMetrics {
     /// How many days the spine shows. ``TodayModel/spineLength`` reads it from
     /// here: how many dots there are is a fact about the graphic, and the model
     /// and the layout must not be able to disagree about it.
-    public static let spineLength = 28
+    ///
+    /// **The value itself moved to `CompassDomain` in week 1b**, for the same
+    /// reason `Projection.habitCap` lives beside the fold rather than beside the
+    /// layout: the launch cache carries the strip, and it is written by
+    /// `CompassInfrastructure`, which cannot import `CompassUI`. Two constants
+    /// would be two things that can disagree, and the one that was wrong would
+    /// be the one nobody is looking at. This stays the only place the *layout*
+    /// asks the question. `docs/technical.md` §4.
+    public static let spineLength = TodaySnapshot.spineLength
 
     public static let spineDot: CGFloat = 9
     public static let spineGap: CGFloat = 2

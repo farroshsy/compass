@@ -198,6 +198,51 @@ struct TodayModelTests {
         #expect(model(events: seeded, clock: clock).isStoreAvailable)
     }
 
+    // MARK: What the other writer did while the app was away
+
+    @Test("a press made in the widget shows up when the app reconciles")
+    func aSecondWritersPressLands() async throws {
+        // Week 2's new fact: this process is no longer the only writer. The app
+        // can sit in the background holding a projection while the widget appends
+        // to the same file, so the screen is only true if it re-reads.
+        //
+        // `TodayView` re-runs this from `.task(id: scenePhase)` every time the app
+        // becomes active. That wiring lives in a view and no test can drive it —
+        // `.claude/skills/testing.md` refuses snapshot tests and XCUITest out
+        // loud — so what is pinned here is the behaviour the wiring depends on:
+        // a replay carrying another writer's event wins over what this process
+        // believes.
+        let clock = ScriptedClock("2026-07-31T09:00:00+07:00")
+        let recorder = FakeRecorder(continuing: seeded)
+        let model = model(events: seeded, clock: clock, recorder: recorder)
+
+        model.toggle(try #require(model.habits.first))
+        #expect(model.isChecked(try #require(model.habits.first)))
+
+        // The widget, in the other process, un-checks it. Its `lamport` is higher
+        // because a Lamport clock resumes past everything already in the log —
+        // which is the only reason the fold prefers it.
+        let fromTheWidget = Event(
+            id: UUID(),
+            device: DeviceID(rawValue: "22222222-2222-4222-8222-222222222222"),
+            lamport: 9,
+            kind: .checkInRevoked,
+            day: day("2026-07-31"),
+            recordedAt: 1_784_000_000_000,
+            zoneOffset: surabayaOffsetSeconds / 60,
+            payload: .habit(habitA)
+        )
+
+        let source = FakeSource(events: seeded + recorder.recorded + [fromTheWidget])
+        let reopened = TodayModel(
+            events: seeded, clock: clock, recorder: recorder, source: source
+        )
+        reopened.toggle(try #require(reopened.habits.first))
+        await reopened.reconcile()
+
+        #expect(reopened.isChecked(try #require(reopened.habits.first)) == false)
+    }
+
     // MARK: What the degraded launch says out loud
 
     /// **The notice was written on the screen and unsayable.**

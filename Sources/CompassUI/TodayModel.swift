@@ -50,36 +50,81 @@ public final class TodayModel {
     /// forgot everything.
     public let isStoreAvailable: Bool
 
+    /// Every award recorded so far, plus what the last pass issued. The
+    /// certificate list reads it; the certificate itself is built from one entry.
+    public private(set) var book: AwardBook = .empty
+
+    /// The certificate to put on screen, or `nil`.
+    ///
+    /// **Set by the engine on the pass that finds something, and by the
+    /// certificate list.** `.claude/skills/ui.md`: "The card is not re-shown
+    /// unprompted. It **is** re-openable from the certificate list in the
+    /// settings sheet." Those are the only two ways it is ever set, and clearing
+    /// it is what dismissal means.
+    public var presented: AchievementID?
+
     private let clock: any Clock
     private let recorder: any EventRecorder
     private let source: any EventSource
+    private let absorber: (any EventAbsorber)?
+    private let awarding: (any Awarding)?
+    private let anchoring: (any Anchoring)?
+
+    /// The launch cache the first frame was rendered from, or `nil` once the
+    /// replay has landed — and `nil` from the start on a launch that read the
+    /// log instead.
+    ///
+    /// While it is set, three reads come from it rather than from
+    /// ``projection``: the totals and the strip. Those are the only three that
+    /// describe history, and a projection rehydrated from a cache describes
+    /// **today and nothing else** — see ``CompassDomain/Projection/restored(from:)``.
+    /// Everything else on the screen is a fact about today and comes from the
+    /// projection as usual, so a tap in this window behaves exactly as it does
+    /// afterwards.
+    private var snapshot: TodaySnapshot?
 
     /// Events applied while a replay was in flight. The replay wins, but it
     /// cannot win over an event it never saw.
     private var appliedDuringReplay: [Event] = []
     private var isReplaying = false
 
-    /// The first frame renders from `events`, which the composition root read
-    /// **synchronously**. There is no `await` before anything is shown.
+    /// The first frame renders with **zero awaits** — from the launch cache when
+    /// there is one, and from events the composition root read synchronously
+    /// when there is not. `docs/technical.md` §4.
     ///
-    /// `docs/technical.md` §4 has that synchronous read coming from a small
-    /// `TodaySnapshot` cache. The cache is week 1b (§11), and on a week-1a log
-    /// the synchronous read is the log itself; ``reconcile()`` is already
-    /// written against the rule the cache needs, so week 1b changes what is
-    /// read and not how it reconciles.
+    /// The cache is preferred because a full rebuild is not free: §6 measures
+    /// 193 ms at five years and 865 ms at ten. It is never trusted for long —
+    /// ``reconcile()`` replays the log from a `.task` immediately afterwards,
+    /// the replay wins, and this drops the cache entirely.
     public init(
         events: [Event],
         clock: any Clock,
         recorder: any EventRecorder,
         source: any EventSource,
+        snapshot: TodaySnapshot? = nil,
+        absorber: (any EventAbsorber)? = nil,
+        awarding: (any Awarding)? = nil,
+        anchoring: (any Anchoring)? = nil,
         isStoreAvailable: Bool = true
     ) {
-        self.projection = project(events)
-        self.subject = declaredSubject(events)
-        self.today = clock.today(cutoffHour: DayBoundary.cutoffHour)
+        let today = clock.today(cutoffHour: DayBoundary.cutoffHour)
+        // A cache for another day is not a cache. The composition root already
+        // rolls it forward; this is the second half of the same guard, because
+        // `TodayModel` is constructible directly and a stale strip is a wrong
+        // screen rather than a slow one.
+        let usable = snapshot.flatMap { $0.day == today ? $0 : $0.rolledForward(to: today) }
+
+        self.snapshot = usable
+        self.projection = usable.map(Projection.restored(from:)) ?? project(events)
+        self.subject = usable.map { SubjectName(restoring: $0.declaredName) }
+            ?? declaredSubject(events)
+        self.today = today
         self.clock = clock
         self.recorder = recorder
         self.source = source
+        self.absorber = absorber
+        self.awarding = awarding
+        self.anchoring = anchoring
         self.isStoreAvailable = isStoreAvailable
     }
 
@@ -98,6 +143,10 @@ public final class TodayModel {
             clock: store.clock,
             recorder: store.recorder,
             source: store.source,
+            snapshot: store.snapshot,
+            absorber: store.absorber,
+            awarding: store.awarding,
+            anchoring: store.anchoring,
             isStoreAvailable: store.isStoreAvailable
         )
     }
@@ -125,10 +174,30 @@ public final class TodayModel {
     /// The largest number on the screen: distinct days on which something was
     /// recorded. Never the streak — a number that resets to zero teaches starting
     /// over, which is the behaviour this project exists to defend against.
-    public var totalDays: Int { projection.daysRecorded }
+    ///
+    /// While the launch cache is standing in for the log, this is **exact
+    /// rather than approximate**, and that is worth the arithmetic: today is the
+    /// only day whose recorded-ness can change before the replay lands, so
+    /// subtracting what the cache said about today and adding what the live
+    /// projection says gives the true count. A cache that could only be roughly
+    /// right about the biggest number on the screen would be worse than no
+    /// cache — the number is the one thing on this screen a person checks.
+    public var totalDays: Int {
+        guard let snapshot else { return projection.daysRecorded }
+        let wasRecorded = snapshot.dayIsRecorded ? 1 : 0
+        let isRecorded = projection.isRecorded(on: today) ? 1 : 0
+        return snapshot.daysRecorded - wasRecorded + isRecorded
+    }
 
     /// The earliest recorded day, or `nil` before anything is recorded.
-    public var firstRecordedDay: Day? { projection.firstCheckedDay }
+    ///
+    /// From the cache while it stands, because a rehydrated projection holds
+    /// only today. The one way it can move in that window is from nothing to
+    /// today, which is exactly what the fallback expresses.
+    public var firstRecordedDay: Day? {
+        guard let snapshot else { return projection.firstCheckedDay }
+        return snapshot.firstRecordedDay ?? projection.firstCheckedDay
+    }
 
     /// The line under the number: "128 days recorded since 5 December 2025".
     ///
@@ -180,12 +249,20 @@ public final class TodayModel {
     /// A day nothing was tracked on is a gap, not a completion: `allSatisfy` over
     /// an empty set is `true`, and the days before the first habit existed are
     /// exactly that set.
+    /// While the launch cache stands in for the log, the twenty-seven earlier
+    /// dots come from it and **today's is recomputed live** — that dot is the
+    /// only one a tap can change before the replay lands, and it is the one the
+    /// finger is pointing at.
     public var spine: [Bool] {
-        (0..<TodayModel.spineLength).map { offset in
-            let day = today.adding(offset - (TodayModel.spineLength - 1))
-            let tracked = projection.habitsActive(on: day)
-            return !tracked.isEmpty && tracked.allSatisfy { $0.isChecked(on: day) }
+        let live = TodaySnapshot.spine(
+            of: projection, endingOn: today, length: TodayModel.spineLength
+        )
+        guard let snapshot, snapshot.day == today, snapshot.spine.count == live.count else {
+            return live
         }
+        var dots = snapshot.spine
+        dots[dots.count - 1] = live[live.count - 1]
+        return dots
     }
 
     // MARK: The tap path
@@ -236,17 +313,17 @@ public final class TodayModel {
         refreshDay()
         let day = today
 
-        let kind = CheckIn.kind(for: habit.id, on: day, in: projection)
-
         Haptics.tap()                                            // §4 line 2
 
-        guard let event = try? recorder.record(                  // §4 line 3
-            kind: kind,
-            day: day,
-            // Present on `checkedIn`, absent on `checkInRevoked`. §3's canonical
-            // form, not a display detail — see ``CheckIn/source(for:from:)``.
-            source: CheckIn.source(for: kind, from: .tap),
-            payload: CheckIn.payload(for: habit.id)
+        // **The same call the widget process makes.** From week 2 there are two
+        // writers on this file, and nothing coordinates them but computing the
+        // same answer from the same log — so the decision, the source and the
+        // payload are composed once, in ``CheckIn/toggle(_:on:in:from:using:)``,
+        // and both callers make that one call. `docs/technical.md` §4 and §11.
+        // The only thing this writer supplies that the widget does not is its
+        // own ``CheckInSource/tap``.
+        guard let event = try? CheckIn.toggle(                   // §4 line 3
+            habit.id, on: day, in: projection, from: .tap, using: recorder
         ) else {
             // The write failed — a full disk, or a store that went away.
             // Applying to the projection anyway would show a check that is not
@@ -263,11 +340,90 @@ public final class TodayModel {
 
         projection.apply(event)                                  // §4 line 1
         if isReplaying { appliedDuringReplay.append(event) }
+        catchUp(event)                                           // §4 line 4
+        award()                                                  // §4 line 5
+    }
 
-        // §4 lines 4 and 5 — `Task { await log.absorb(event) }` and
-        // `Task { await achievements.evaluate(projection) }` — have nothing to
-        // dispatch to yet. `actor EventLog` is week 1b and the achievement
-        // engine is week 3 (§11 build order). They attach here.
+    // MARK: The certificate
+
+    /// §4 line 5: `Task { await achievements.evaluate(projection) }`.
+    ///
+    /// **Nothing on the tap path waits for it.** A milestone noticed a frame late
+    /// is late; a milestone noticed at the cost of a frame breaks the one rule the
+    /// whole product is. `Awarding` reads the log itself — see the port for why it
+    /// cannot take the projection — so this dispatches and returns.
+    ///
+    /// A failed pass is silent. There is no achievement-failure surface anywhere,
+    /// by design: the engine is idempotent and re-runnable, so the next launch
+    /// finds whatever this one missed.
+    private func award() {
+        guard let awarding else { return }
+        Task { @MainActor in
+            guard let issued = try? await awarding.evaluate() else { return }
+            adopt(issued)
+        }
+    }
+
+    /// Takes a fresh book and raises the card if the pass issued anything.
+    ///
+    /// **The newest award only.** A first run over accumulated history can issue
+    /// several at once — the 7-day and the 30-day land in the same pass — and
+    /// three stacked full-screen covers would be a takeover celebration, which is
+    /// banned. The rest stay in the certificate list, which is where a
+    /// certificate is re-openable.
+    private func adopt(_ issued: AwardBook) {
+        book = issued
+        guard presented == nil, let newest = issued.newlyIssued.first else { return }
+        presented = newest
+    }
+
+    /// The certificate to draw, or `nil` when the record is not in the book or
+    /// its canonical form is refused.
+    ///
+    /// A record that cannot be canonicalised cannot be signed either, so it has
+    /// no digest to print and there is nothing honest to show. It is `nil` rather
+    /// than a certificate with a blank line in it.
+    public func certificate(_ id: AchievementID) -> CertificatePresentation? {
+        guard let achievement = book.achievement(id),
+              let digest = try? achievement.digest
+        else { return nil }
+
+        return CertificatePresentation(
+            id: id,
+            copy: CertificateCopy(
+                achievement: achievement,
+                digest: digest,
+                // Resolved at render time from the live fold — the same mapping
+                // that is written into the export bundle as `habits.json`, and
+                // the reason no display name is ever inside the digest.
+                names: habitNames,
+                attestation: book.attestations[id],
+                now: clock.now()
+            ),
+            evidenceRoot: achievement.witness.evidenceRoot
+        )
+    }
+
+    /// `HabitID` -> display name, including archived habits: a name must stay
+    /// resolvable for every identifier that ever appears in a record, and
+    /// archiving does not remove it from history.
+    public var habitNames: [HabitID: String] {
+        projection.habits.mapValues(\.name)
+    }
+
+    /// The certificate list, newest first. Revoked entries **keep their place**.
+    public var certificates: [Achievement] { book.achievements }
+
+    /// §4 line 4: `Task { await log.absorb(event) }`.
+    ///
+    /// **Nothing waits on it and nothing can fail.** The event is already
+    /// durable — ``EventRecorder`` wrote it synchronously, above — so this is
+    /// the actor and the disposable cache catching up with a fact that is
+    /// already on disk. The `Task` is what keeps the `await` out of the tap
+    /// path, which is the rule the whole of §4 is about.
+    private func catchUp(_ event: Event) {
+        guard let absorber else { return }
+        Task { await absorber.absorb(event) }
     }
 
     // MARK: The settings sheet
@@ -402,6 +558,7 @@ public final class TodayModel {
             return nil
         }
         if isReplaying { appliedDuringReplay.append(event) }
+        catchUp(event)
         return event
     }
 
@@ -429,6 +586,65 @@ public final class TodayModel {
         }
         projection = replayed
         subject = replayedSubject
+
+        // **The replay wins**, so the cache stops standing in for the log — for
+        // the totals, the strip, and the declared name alike. Dropping it here
+        // rather than letting it linger is what makes §4's sentence literally
+        // true: from this point the screen is a function of the log and of
+        // nothing else.
+        snapshot = nil
+
+        // And the engine runs over the log that just landed. This is the pass
+        // that backfills historical awards the first time a rule ships, which
+        // `docs/technical.md` §10a names as the trigger for week 4's weekly
+        // log-head anchoring: it is guaranteed to fire on the first run.
+        //
+        // It is awaited here — unlike on the tap path — because `reconcile` is
+        // already the `.task` that follows the first frame and is allowed to take
+        // time. Nothing is on screen waiting for it.
+        if let awarding, let issued = try? await awarding.evaluate() {
+            adopt(issued)
+        }
+
+        await drainAnchors()
+    }
+
+    /// The **launch drain**, `.claude/skills/ios.md` and
+    /// `docs/achievement-protocol.md` §7.1.
+    ///
+    /// Anchoring retries on two paths and the corpus is emphatic that it is both,
+    /// not either: a `BGProcessingTask` carries no execution guarantee, and the
+    /// UI is forbidden to show anchoring failure — so the scheduler path alone
+    /// could fail undetectably by design. This is the other one, and it is also
+    /// the only one of the two a test can observe.
+    ///
+    /// It is awaited inside ``reconcile()`` rather than dispatched into a
+    /// detached `Task`, and that is deliberate on both counts. `reconcile` is
+    /// already the `.task` that runs *after* the first frame, so there is no
+    /// network call on the launch path — the rule `.claude/skills/ios.md` states
+    /// without exception — and nothing on screen is waiting on it. Awaiting is
+    /// what makes it observable: a detached task is a race a test can only sleep
+    /// through.
+    ///
+    /// A drain with nothing due makes **no request at all**, which is what makes
+    /// this safe on every foreground rather than only on a cold launch.
+    ///
+    /// A failure here is silent, like every other anchoring failure. The pass is
+    /// idempotent and re-runnable, so the next foreground picks up whatever this
+    /// one missed.
+    private func drainAnchors() async {
+        guard let anchoring, let drained = try? await anchoring.drain() else { return }
+
+        // The one thing a drain can change on screen: an attestation that has
+        // reached `confirmed` gives the certificate its second line. Everything
+        // else about the book — which achievements exist, which are revoked — is
+        // untouched, because anchoring never awards or un-awards anything.
+        book = AwardBook(
+            achievements: book.achievements,
+            revoked: book.revoked,
+            attestations: drained.attestations,
+            newlyIssued: book.newlyIssued
+        )
     }
 
     /// Re-reads the civil day. Called when the view appears, whenever the app

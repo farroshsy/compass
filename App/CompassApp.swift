@@ -20,6 +20,18 @@ struct CompassApp: App {
 
     @State private var model = TodayModel(AppComposition.compose())
 
+    /// The one line week 4 adds to this folder.
+    ///
+    /// `BGTaskScheduler.register` must run **before the app finishes
+    /// launching** — a constraint of the framework, not a decision this file
+    /// gets to make — so it is the rare thing that genuinely cannot live
+    /// anywhere else. It still holds no branch and no argument:
+    /// ``CompassInfrastructure/AnchorScheduler`` is where every line that can be
+    /// wrong lives, and `swift test` compiles that.
+    init() {
+        AnchorScheduler.register()
+    }
+
     var body: some Scene {
         WindowGroup {
             TodayView(model: model)

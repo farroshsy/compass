@@ -81,6 +81,96 @@ func uuid(lamport: Int, device: DeviceID) -> UUID {
     ))
 }
 
+/// Links a list of events into per-writer chains, in place.
+///
+/// Each writer's first event gets ``Event/genesisPrev`` and every later one gets
+/// the `content_hash` of that writer's previous event — the same walk
+/// `EventJournal` performs one event at a time as it appends, and the same one
+/// the `reproject` hatch performs over a whole log. Positions in the array are
+/// preserved so a caller can zip a chained log against the one it came from.
+func chained(_ events: [Event]) throws -> [Event] {
+    var result = events
+    var heads: [DeviceID: Data] = [:]
+
+    for index in events.indices.sorted(by: { events[$0].order < events[$1].order }) {
+        let linked = events[index].chained(to: heads[events[index].device] ?? Event.genesisPrev)
+        result[index] = linked
+        heads[linked.device] = try linked.contentHash
+    }
+    return result
+}
+
+/// Lowercase hex, for pinning a digest against a value computed outside this
+/// project. `docs/technical.md` §9.7.
+func hex(_ data: Data) -> String {
+    data.map { String(format: "%02x", $0) }.joined()
+}
+
+/// An absolute instant, written with its offset so the fixture is unambiguous
+/// about which moment it means — the same fixture the impure suite has.
+///
+/// Domain holds no clock, so every instant a Domain test needs is a literal like
+/// this one and never `Date()`.
+func instant(_ iso8601: String) -> Date {
+    let formatter = ISO8601DateFormatter()
+    formatter.formatOptions = [.withInternetDateTime]
+    guard let date = formatter.date(from: iso8601) else {
+        fatalError("test fixture is not an ISO 8601 instant: \(iso8601)")
+    }
+    return date
+}
+
+extension Event {
+
+    /// The same event with one field changed — the mutation operator the digest
+    /// tests are written in.
+    ///
+    /// Every parameter defaults to "unchanged", so a call site names only what
+    /// it is moving. `source` is the one field that also has to be *removable*,
+    /// because a `checkInRevoked` carries none and its absence is part of the
+    /// canonical form; ``withoutSource()`` is that case, spelled separately
+    /// rather than as a double optional nobody can read.
+    func with(
+        v: Int? = nil,
+        id: UUID? = nil,
+        device: DeviceID? = nil,
+        lamport: Int? = nil,
+        kind: EventKind? = nil,
+        day: Day? = nil,
+        recordedAt: Int? = nil,
+        zoneOffset: Int? = nil,
+        source: CheckInSource? = nil,
+        payload: EventPayload? = nil,
+        extra: [String: JSONValue]? = nil,
+        unknownFields: [String: JSONValue]? = nil
+    ) -> Event {
+        Event(
+            v: v ?? self.v,
+            id: id ?? self.id,
+            device: device ?? self.device,
+            lamport: lamport ?? self.lamport,
+            kind: kind ?? self.kind,
+            day: day ?? self.day,
+            recordedAt: recordedAt ?? self.recordedAt,
+            zoneOffset: zoneOffset ?? self.zoneOffset,
+            source: source ?? self.source,
+            payload: payload ?? self.payload,
+            prev: prev,
+            extra: extra ?? self.extra,
+            unknownFields: unknownFields ?? self.unknownFields
+        )
+    }
+
+    /// The same event with no `source` at all — not `null`, absent.
+    func withoutSource() -> Event {
+        Event(
+            v: v, id: id, device: device, lamport: lamport, kind: kind, day: day,
+            recordedAt: recordedAt, zoneOffset: zoneOffset, source: nil, payload: payload,
+            prev: prev, extra: extra, unknownFields: unknownFields
+        )
+    }
+}
+
 /// A deterministic, order-independent serialisation of a projection, so
 /// "byte-identical serialised state" means something. Swift's `Dictionary`
 /// iteration order is not stable, so sorting here is the point, not decoration.

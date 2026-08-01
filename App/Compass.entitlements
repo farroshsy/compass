@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!--
+	The App Group the store lives in from week 1b. `docs/technical.md` §6.
+
+	It is here because a widget cannot read a container it has no access to, and
+	the widget ships in week 2. `AppComposition.appGroupIdentifier` is the same
+	string in code, and `AppComposition.storeURL` falls back to the app's own
+	Documents directory when this container is unreachable — a build signed
+	without a provisioning profile carrying this group still runs and still
+	records every event. §6 is explicit that the paid developer account must not
+	be a gate on storage code.
+	-->
+	<key>com.apple.security.application-groups</key>
+	<array>
+		<string>group.dev.farros.compass</string>
+	</array>
+</dict>
+</plist>

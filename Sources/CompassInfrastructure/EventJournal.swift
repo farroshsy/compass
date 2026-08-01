@@ -40,8 +40,12 @@ public final class EventJournal: Sendable {
     private struct State {
         var descriptor: Int32
         /// `nil` until this process's first write, which is when the tail is
-        /// read to recover the sequence. See ``record``.
-        var nextLamport: Int?
+        /// read to recover the sequence **and** the chain head. See ``record``.
+        ///
+        /// The two are one register with two halves and are recovered together:
+        /// a `lamport` without its head would stamp an event onto a chain whose
+        /// previous link is unknown, which is a fork rather than an append.
+        var resume: WriterResume?
         var isClosed: Bool
     }
 
@@ -55,34 +59,38 @@ public final class EventJournal: Sendable {
 
     /// Opens the log for appending, creating it if it is not there.
     ///
-    /// `highWaterMark` is the highest `lamport` **this writer** has already used,
-    /// when the caller already knows it. Supplying it is what keeps a full decode
-    /// of the log off the tap path: without it the first `record` of the process
-    /// falls back to reading and decoding the whole file, measured at 193 ms at
-    /// five years and 865 ms at ten (`docs/technical.md` §6) — on the main actor,
-    /// inside the synchronous steps §4 requires to be microseconds.
+    /// `resume` is where **this writer** left off — the highest `lamport` it has
+    /// used and the `content_hash` of its last event — when the caller already
+    /// knows. Supplying it is what keeps a full decode of the log off the tap
+    /// path: without it the first `record` of the process falls back to reading
+    /// and decoding the whole file, measured at 193 ms at five years and 865 ms
+    /// at ten (`docs/technical.md` §6) — on the main actor, inside the
+    /// synchronous steps §4 requires to be microseconds.
     ///
-    /// The composition root has that number for free: it reads the log
-    /// synchronously to render the first frame, and ``JournalRead/highWaterMarks``
-    /// falls out of the same pass.
+    /// The composition root has both numbers for free when it reads the log
+    /// synchronously to render the first frame: ``JournalRead/resume(for:)``
+    /// falls out of the same pass. When it launches from the snapshot cache
+    /// instead it does not read the log at all, passes `nil`, and the first
+    /// write of the process pays for the recovery under the advisory `flock` —
+    /// which is exactly the cold-start path `docs/technical.md` §4 describes.
     ///
     /// Two conditions make passing it in safe, and both are worth stating because
     /// they are the reason this is not just an optimisation with a race in it:
     ///
     /// - It must be derived from **this store's log, for this writer** — from
-    ///   ``JournalRead/highWaterMarks``, which counts lines this build cannot
-    ///   decode. Nothing verifies it here; that is the point.
+    ///   ``JournalRead/resume(for:)``, whose `lamport` half counts lines this
+    ///   build cannot decode. Nothing verifies it here; that is the point.
     /// - Reading it outside the advisory `flock` is safe because a `lamport`
-    ///   sequence belongs to one writer and **no two processes share a writer
-    ///   identity** (`docs/technical.md` §4). The widget appending concurrently
-    ///   cannot move this writer's mark, so there is nothing for the lock to
-    ///   protect. The lock still guards the fallback path below, where the tail
-    ///   is read and appended to in one operation.
+    ///   sequence and a chain belong to one writer and **no two processes share
+    ///   a writer identity** (`docs/technical.md` §4). The widget appending
+    ///   concurrently cannot move this writer's mark or its head, so there is
+    ///   nothing for the lock to protect. The lock still guards the fallback
+    ///   path below, where the tail is read and appended to in one operation.
     public init(
         layout: StoreLayout,
         writer: DeviceID,
         clock: SystemClock = SystemClock(),
-        highWaterMark: Int? = nil
+        resume: WriterResume? = nil
     ) throws {
         try layout.prepare()
 
@@ -92,7 +100,7 @@ public final class EventJournal: Sendable {
         self.state = Mutex(
             State(
                 descriptor: try EventJournal.openForAppend(layout.events),
-                nextLamport: highWaterMark.map { $0 + 1 },
+                resume: resume,
                 isClosed: false
             )
         )
@@ -102,6 +110,50 @@ public final class EventJournal: Sendable {
         state.withLock { state in
             if !state.isClosed { Darwin.close(state.descriptor) }
             state.isClosed = true
+        }
+    }
+
+    /// Hands the journal a resume it did not have, **if it still has none.**
+    ///
+    /// This is how the launch path keeps a full log decode off both the first
+    /// frame and the first tap at the same time. When the app launches from the
+    /// snapshot cache the composition root never reads the log, so this journal
+    /// starts unprimed and its first write would pay for the recovery under the
+    /// `flock` — measured at 193 ms at five years and 865 ms at ten
+    /// (`docs/technical.md` §6), on the main actor, inside steps §4 requires to
+    /// be microseconds. ``EventLog/replay()`` reads the log a moment later, from
+    /// the `.task` that follows the first frame, and hands the answer here.
+    ///
+    /// **The head is never overwritten.** If a tap beat the replay, this writer's
+    /// head is already the truth about a line that is already on disk, and a
+    /// value read *before* that write would move it backwards and fork the chain.
+    /// Losing the optimisation is free; losing the chain is not.
+    ///
+    /// **The clock only ever goes forwards, and it does move.** That half is not
+    /// an optimisation and refusing it was wrong once the widget existed: a
+    /// process that has been alive across a background period holds a mark from
+    /// whenever it was primed, and the *other* writer has been appending in the
+    /// meantime. Its next event would then be stamped with a `lamport` no greater
+    /// than one the widget already used, and `docs/technical.md` §3 resolves the
+    /// `(habit, day)` cell last-writer-wins under `(lamport, device)` — so the
+    /// tap the user just made could lose to a widget press from ten minutes ago,
+    /// decided by which random UUID sorts higher. Adopting a strictly greater
+    /// mark is always safe, because a `lamport` is a lower bound this writer must
+    /// exceed and never a claim about which line is its own.
+    ///
+    /// Reading it outside the `flock` is safe for the stated reason the
+    /// `resume:` initialiser is: a chain belongs to one writer, and no two
+    /// processes share a writer identity (`docs/technical.md` §4). The clock half
+    /// is safe to read unlocked because it is only ever raised.
+    public func prime(_ resume: WriterResume) {
+        state.withLock { state in
+            guard !state.isClosed else { return }
+            guard let current = state.resume else {
+                state.resume = resume
+                return
+            }
+            guard resume.lamport > current.lamport else { return }
+            state.resume = WriterResume(lamport: resume.lamport, head: current.head)
         }
     }
 
@@ -125,11 +177,16 @@ public final class EventJournal: Sendable {
     /// caller that also applied it to the projection — never twice, and never in
     /// the fold. `docs/technical.md` §3, `.claude/skills/ios.md`.
     ///
-    /// On this process's first write the tail is read to recover `lamport`, and
-    /// that read-then-append is held under an advisory `flock` for its duration,
-    /// per `docs/technical.md` §4. **This is the only place a cross-process lock
-    /// is taken, and it is never taken on the tap path after the first write of
-    /// a process's lifetime.**
+    /// On this process's first write the tail is read to recover `lamport` **and
+    /// this writer's chain head**, and that read-then-append is held under an
+    /// advisory `flock` for its duration, per `docs/technical.md` §4. **This is
+    /// the only place a cross-process lock is taken, and it is never taken on
+    /// the tap path after the first write of a process's lifetime.**
+    ///
+    /// `prev` is the `content_hash` of the previous event on **this writer's**
+    /// chain, or 32 zero bytes for the first event on it. It is computed here
+    /// rather than by the caller because the head is this writer's state and
+    /// nobody else's — the same argument that puts `lamport` here.
     @discardableResult
     public func record(
         kind: EventKind,
@@ -142,56 +199,60 @@ public final class EventJournal: Sendable {
         return try state.withLock { state in
             guard !state.isClosed else { throw JournalError.closed }
 
-            func stamp(_ lamport: Int) -> Event {
+            func stamp(_ resume: WriterResume) -> Event {
                 Event(
                     id: UUID(),
                     device: writer,
-                    lamport: lamport,
+                    lamport: resume.lamport + 1,
                     kind: kind,
                     day: day,
                     recordedAt: clock.milliseconds(at: instant),
                     zoneOffset: clock.zoneOffsetMinutes(at: instant),
                     source: source,
                     payload: payload,
-                    // `prev` is the genesis value for every week-1a event. The
-                    // hash chain lands in week 1b together with the canonical
-                    // byte encoding and `content_hash`, and the one-time
-                    // `reproject` hatch in `docs/technical.md` §11 replays this
-                    // log into a chained one. Chaining here first would mean
-                    // hashing bytes whose canonical form does not exist yet.
-                    prev: Event.genesisPrev
+                    prev: resume.head
                 )
             }
 
-            if state.nextLamport == nil {
-                return try EventJournal.withExclusiveLock(state.descriptor) {
-                    let recovered = try EventJournal.highWaterMark(
-                        at: layout.events, writer: writer
-                    )
-                    let event = stamp(recovered + 1)
-                    try EventJournal.writeLine(event, to: state.descriptor)
-                    state.nextLamport = event.lamport + 1
-                    return event
-                }
+            if let resume = state.resume {
+                let event = stamp(resume)
+                state.resume = try EventJournal.write(event, to: state.descriptor)
+                return event
             }
 
-            let event = stamp(state.nextLamport!)
-            try EventJournal.writeLine(event, to: state.descriptor)
-            state.nextLamport = event.lamport + 1
-            return event
+            return try EventJournal.withExclusiveLock(state.descriptor) {
+                let recovered = try JournalReader(url: layout.events).read().resume(for: writer)
+                let event = stamp(recovered)
+                state.resume = try EventJournal.write(event, to: state.descriptor)
+                return event
+            }
         }
     }
 
     /// Appends an event **verbatim** — the ``EventSink`` behaviour. Used to
     /// re-append events this writer did not stamp, such as a restored bundle.
-    /// Nothing is rewritten and nothing is renumbered.
+    /// Nothing is rewritten, nothing is renumbered, and no `prev` is rewritten:
+    /// a foreign event arrives with its own chain already on it.
     public func appendSync(_ event: Event) throws {
         try state.withLock { state in
             guard !state.isClosed else { throw JournalError.closed }
-            try EventJournal.writeLine(event, to: state.descriptor)
-            if event.device == writer, let next = state.nextLamport {
-                state.nextLamport = max(next, event.lamport + 1)
-            }
+            let written = try EventJournal.write(event, to: state.descriptor)
+            guard let resume = state.resume else { return }
+
+            // The clock advances past **any** writer's event, because that is
+            // what a Lamport clock is: this process has now seen this line, so
+            // whatever it stamps next must sort after it.
+            let clock = max(resume.lamport, event.lamport)
+
+            // The head moves only for this writer's own event, and only when the
+            // event is a later one than anything seen — otherwise the next
+            // `record` would chain onto an event this one has already superseded,
+            // forking the chain against a line that is already on disk.
+            let isOwnAndLater = event.device == writer && event.lamport >= resume.lamport
+            state.resume = WriterResume(
+                lamport: clock,
+                head: isOwnAndLater ? written.head : resume.head
+            )
         }
     }
 
@@ -205,7 +266,14 @@ public final class EventJournal: Sendable {
 
     // MARK: File primitives
 
-    private static func openForAppend(_ url: URL) throws -> Int32 {
+    /// Internal rather than private since week 3, so `awards.jsonl` and
+    /// `attestations.jsonl` open their files the same way this one does. The
+    /// "one `write(2)` of one complete line to an `O_APPEND` descriptor"
+    /// discipline in `docs/technical.md` §4 is a property of how this project
+    /// appends to any file, not of the event log specifically, and writing it a
+    /// second time is how two files end up with two different answers about what
+    /// a torn line is.
+    static func openForAppend(_ url: URL) throws -> Int32 {
         let descriptor = url.path.withCString { path -> Int32 in
             var result: Int32 = -1
             repeat {
@@ -217,11 +285,32 @@ public final class EventJournal: Sendable {
         return descriptor
     }
 
+    /// Canonicalises the event, then writes it, and returns where this writer's
+    /// chain now stands.
+    ///
+    /// **In that order, deliberately.** `content_hash` is computed over the
+    /// canonical bytes, and those bytes can be refused — a control character in
+    /// a habit name is rejected at write time rather than escaped
+    /// (`docs/achievement-protocol.md` §6.3). Hashing first means a refused
+    /// event never reaches the file and never moves the head, so the chain and
+    /// the log agree even on the failure path. Hashing afterwards would put a
+    /// line on disk that nothing can ever link to.
+    private static func write(_ event: Event, to descriptor: Int32) throws -> WriterResume {
+        let head = try event.contentHash
+        try writeLine(event, to: descriptor)
+        return WriterResume(lamport: event.lamport, head: head)
+    }
+
     /// One `write(2)` of one complete line. A short write is reported rather
     /// than looped over: looping would be a second, non-atomic append, which is
     /// the exact interleaving this design exists to prevent.
     private static func writeLine(_ event: Event, to descriptor: Int32) throws {
-        var line = try encoder.encode(event)
+        try writeLine(try encoder.encode(event), to: descriptor)
+    }
+
+    /// The same discipline for any encoded record. `docs/technical.md` §4.
+    static func writeLine(_ encoded: Data, to descriptor: Int32) throws {
+        var line = encoded
         guard !line.contains(0x0A) else { throw JournalError.embeddedNewline }
         line.append(0x0A)
 
@@ -240,6 +329,18 @@ public final class EventJournal: Sendable {
         }
     }
 
+    /// Advisory `flock` on the log, for a caller that holds no descriptor of its
+    /// own — the `reproject` hatch, which rewrites the file rather than
+    /// appending to it.
+    ///
+    /// `docs/technical.md` §4: "The widget never rewrites, compacts, or
+    /// truncates. Only the app process does, and only under the same lock."
+    static func withExclusiveLock<T>(onFileAt url: URL, _ body: () throws -> T) throws -> T {
+        let descriptor = try EventJournal.openForAppend(url)
+        defer { Darwin.close(descriptor) }
+        return try withExclusiveLock(descriptor, body)
+    }
+
     /// Advisory `flock` for the duration of a read-tail-then-append.
     /// `docs/technical.md` §4. In-process serialisation is the `Mutex`; this is
     /// the cross-process half, and `Synchronization.Mutex` does not span
@@ -255,17 +356,6 @@ public final class EventJournal: Sendable {
 
         defer { _ = advisoryLock(descriptor, LOCK_UN) }
         return try body()
-    }
-
-    /// The highest `lamport` this writer has already used, or `0` if it has
-    /// never written. Read under the lock taken by ``record``.
-    ///
-    /// This folds over ``JournalRead/highWaterMarks`` and **not** over
-    /// `.events`, because `events` holds only the lines this build could decode.
-    /// See ``JournalRead/highWaterMarks`` for why the difference is a
-    /// correctness bug and not a rounding error.
-    private static func highWaterMark(at url: URL, writer: DeviceID) throws -> Int {
-        try JournalReader(url: url).read().highWaterMarks[writer] ?? 0
     }
 
     /// `withoutEscapingSlashes` only. The on-disk line is not required to be
@@ -316,7 +406,8 @@ public struct JournalReader: Sendable {
     public func read() throws -> JournalRead {
         guard FileManager.default.fileExists(atPath: url.path) else {
             return JournalRead(
-                events: [], damagedLines: [], droppedPartialTail: false, highWaterMarks: [:]
+                events: [], damagedLines: [], droppedPartialTail: false, highWaterMarks: [:],
+                chain: ChainVerification(heads: [:], breaks: [])
             )
         }
 
@@ -364,7 +455,8 @@ public struct JournalReader: Sendable {
             events: events,
             damagedLines: damagedLines,
             droppedPartialTail: droppedPartialTail,
-            highWaterMarks: highWaterMarks
+            highWaterMarks: highWaterMarks,
+            chain: EventChain.verify(events)
         )
     }
 }
@@ -415,19 +507,127 @@ public struct JournalRead: Hashable, Sendable {
     /// is undecodable here.
     public let highWaterMarks: [DeviceID: Int]
 
+    /// Every writer's chain, walked. `docs/technical.md` §3.
+    ///
+    /// Reported rather than acted on. `docs/technical.md` §6 makes the response
+    /// to damage a policy — copy the file aside first, replay the longest valid
+    /// prefix, surface one notice — and a reader that decided any of that for
+    /// its caller would be making that policy in the wrong place. What it owes
+    /// the caller is the truth about what is on disk.
+    public let chain: ChainVerification
+
     public init(
         events: [Event],
         damagedLines: [Int],
         droppedPartialTail: Bool,
-        highWaterMarks: [DeviceID: Int] = [:]
+        highWaterMarks: [DeviceID: Int] = [:],
+        chain: ChainVerification = ChainVerification(heads: [:], breaks: [])
     ) {
         self.events = events
         self.damagedLines = damagedLines
         self.droppedPartialTail = droppedPartialTail
         self.highWaterMarks = highWaterMarks
+        self.chain = chain
     }
 
-    public var isIntact: Bool { damagedLines.isEmpty && !droppedPartialTail }
+    public var isIntact: Bool {
+        damagedLines.isEmpty && !droppedPartialTail && chain.isIntact
+    }
+
+    /// Where `writer` resumes: the `lamport` its next event must exceed, and the
+    /// `content_hash` of its own last event.
+    ///
+    /// **The two halves come from different places, and that is not an
+    /// accident.**
+    ///
+    /// The head is this writer's and only this writer's: `prev` chains per
+    /// writer, never globally, and it can only come from a line this build *can*
+    /// decode, because a `content_hash` is computed over canonical bytes and an
+    /// undecodable line has none.
+    ///
+    /// The clock is the maximum over **every** writer, which is what makes it a
+    /// Lamport clock rather than a per-writer serial number — see below. It folds
+    /// over ``highWaterMarks``, which counts every stamped line including the ones
+    /// this build cannot decode, because reissuing a `lamport` a newer build
+    /// already used would break the `(lamport, device)` uniqueness the total order
+    /// depends on.
+    ///
+    /// So on a log carrying a line from a newer build, the next event's
+    /// `lamport` skips past it while its `prev` points at the last line this
+    /// build understood. The chain reports that as a break, which is the honest
+    /// answer and the same "longest valid prefix" rule §6 applies to replay. The
+    /// alternative — refusing to write — is refusing to record a tap because
+    /// some other build wrote something, and `docs/technical.md` §6 ends its
+    /// damage policy with "never refuse to launch".
+    ///
+    /// ### Why the clock reads every writer's mark, and not just this one's
+    ///
+    /// **This changed in week 2, when the widget made a second writer real, and
+    /// it is a correctness fix rather than a refinement.** It used to read
+    /// `highWaterMarks[writer]` — this writer's own mark. With one writer those
+    /// are the same number and nothing could tell them apart. With two they are
+    /// not, and the difference is silent, permanent and wrong:
+    ///
+    /// > The app seeds four habits and records a check-in, reaching `lamport 5`.
+    /// > The widget process, which has never written, starts its sequence at
+    /// > **1**. The user presses the widget to un-check that habit, and the
+    /// > revocation is written at `(1, widget)`. `docs/technical.md` §3 resolves
+    /// > the `(habit, day)` cell last-writer-wins under `(lamport, device)` — so
+    /// > `(5, app)` beats `(1, widget)`, the fold keeps the check-in, and the
+    /// > un-check is discarded. Not delayed: discarded, for as long as the log
+    /// > exists, with the event sitting on disk the whole time.
+    ///
+    /// §3 justifies the ordering with "Lamport first so causality holds", and
+    /// causality is exactly what a per-writer serial number does not carry. A
+    /// Lamport clock advances past everything the writer has *seen*, which is
+    /// what this now does: an event written after reading another writer's event
+    /// is strictly greater than it, so "the user's most recent action wins" is a
+    /// property of the fold rather than a coincidence of which process happened to
+    /// start first.
+    ///
+    /// Per-writer monotonicity is untouched — a maximum over a set that includes
+    /// this writer's own mark can never be less than it — and so is
+    /// `(lamport, device)` uniqueness: two writers may now land on the same
+    /// `lamport`, which is what the `device` tiebreak has always been for, and
+    /// neither ever reuses one of its own.
+    public func resume(for writer: DeviceID) -> WriterResume {
+        WriterResume(
+            lamport: highWaterMarks.values.max() ?? 0,
+            head: chain.head(of: writer)
+        )
+    }
+}
+
+/// Where one writer resumes: the `lamport` its next event must exceed, and the
+/// `content_hash` that the next event on its chain must carry as `prev`.
+///
+/// One value rather than two arguments because they are only ever correct
+/// together. A `lamport` recovered without its head stamps an event onto a chain
+/// whose previous link is unknown, which is a fork rather than an append —
+/// exactly the failure per-writer chains exist to prevent.
+public struct WriterResume: Hashable, Sendable {
+
+    /// The highest `lamport` **any** writer has used in this log; `0` on an empty
+    /// one, so the first event ever stamped is `1`.
+    ///
+    /// It is a Lamport clock, not this writer's serial number: it advances past
+    /// everything this writer has seen, so an event recorded after reading
+    /// another writer's event sorts strictly after it. See
+    /// ``JournalRead/resume(for:)`` for the check-in a per-writer counter
+    /// silently discarded.
+    public let lamport: Int
+
+    /// `prev` for this writer's next event: the `content_hash` of its last one,
+    /// or ``EventChain/genesis`` when it has never written.
+    public let head: Data
+
+    public init(lamport: Int, head: Data) {
+        self.lamport = lamport
+        self.head = head
+    }
+
+    /// A writer that has never written anything.
+    public static let fresh = WriterResume(lamport: 0, head: EventChain.genesis)
 }
 
 // MARK: - When the store cannot be opened at all

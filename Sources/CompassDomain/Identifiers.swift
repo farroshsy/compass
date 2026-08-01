@@ -118,9 +118,96 @@ public struct EventKind: StringBacked {
 
 /// Deterministic: `"<ruleID>@<earnedOn>"`, never a UUID.
 /// `docs/achievement-protocol.md` §3.1.
-public struct AchievementID: StringBacked {
+///
+/// A random UUID means replaying the log twice produces two awards for one fact,
+/// and two devices produce duplicates. A deterministic ID makes the engine safely
+/// re-runnable an unlimited number of times, which is the precondition for
+/// retroactive edits and rule backfill.
+public struct AchievementID: StringBacked, Identifiable {
     public let rawValue: String
     public init(rawValue: String) { self.rawValue = rawValue }
+
+    /// The only way one is built. `docs/achievement-protocol.md` §3.1.
+    public init(rule: RuleID, earnedOn: Day) {
+        self.rawValue = "\(rule.rawValue)@\(earnedOn.iso)"
+    }
+
+    /// `Identifiable`, because the certificate is presented by identifier —
+    /// `.fullScreenCover(item:)` from Today and from the certificate list.
+    /// It is already deterministic and already unique per record, so there is
+    /// nothing to invent.
+    public var id: String { rawValue }
+}
+
+/// A rule's identity. **It MUST NOT change meaning.**
+/// `docs/achievement-protocol.md` §3.1.
+///
+/// If what a rule counts changes — a rest-day exemption is added, a streak is
+/// redefined — that is a **new** `RuleID`, never a new version of an old one.
+/// Reusing an ID with new semantics would let the same underlying fact hash to a
+/// different achievement and be awarded twice. `RuleSpec.version` exists for
+/// wording changes that do not alter what is counted; it is not in the digest and
+/// not in the ID.
+///
+/// ### A rule ID never carries a habit's display name
+///
+/// `docs/achievement-protocol.md` §3.1 gives `"streak.meditate.100"` as its
+/// example, and taken literally that is the failure §3.4 exists to prevent, one
+/// field over: `rule.id` is inside the digest (§6.2), it is printed verbatim in
+/// the certificate's identifier block, and the certificate is the artifact
+/// designed to be handed to a stranger. A record named after a recovery
+/// programme, a medical routine or a therapy task would then be unredactable
+/// forever — which is precisely the argument §3.4 makes about `facts`.
+///
+/// So a habit-scoped rule names the opaque ``HabitID``:
+/// `streak.habit-a.100`, never `streak.meditate.100`. `memory/decisions.md`,
+/// 2026-08-01. The consequence is the one B5 asked to be decided before week 3:
+/// after a rename, the claim line and the identifier line **cannot** disagree,
+/// because the identifier line names no habit at all.
+public struct RuleID: StringBacked {
+    public let rawValue: String
+    public init(rawValue: String) { self.rawValue = rawValue }
+}
+
+/// A key in ``Achievement/facts``. `docs/achievement-protocol.md` §3.4.
+///
+/// An open map, so a `RawRepresentable` string rather than an enum: a fact key
+/// written by a newer build decodes cleanly here and is re-emitted unchanged.
+public struct FactKey: StringBacked, CodingKeyRepresentable {
+    public let rawValue: String
+    public init(rawValue: String) { self.rawValue = rawValue }
+
+    /// `threshold` consecutive qualifying days, on a `streak` rule.
+    public static let streak = FactKey(rawValue: "streak")
+    /// `threshold` qualifying days in total, on a `total` rule.
+    public static let total = FactKey(rawValue: "total")
+    /// The habit the claim is about. **Never `habit`** — never the display name.
+    public static let habitID = FactKey(rawValue: "habitID")
+    /// The first counted day, as `"YYYY-MM-DD"`.
+    public static let from = FactKey(rawValue: "from")
+    /// Days counted that came from a live tap, widget press or shortcut.
+    public static let sourceLive = FactKey(rawValue: "source_live")
+    /// Days counted that were backfilled. `0` on every v1 record, and sealed as
+    /// `0` rather than omitted: "no day was backfilled" and "we did not record
+    /// whether any day was backfilled" are different claims. §3.4.
+    public static let sourceBackfill = FactKey(rawValue: "source_backfill")
+
+    // `CodingKeyRepresentable`, so `[FactKey: JSONValue]` encodes as a JSON
+    // object rather than as the flat key/value array `JSONEncoder` writes for a
+    // dictionary with a non-`String` key. The on-disk shape of `facts` is an
+    // object in every example in `docs/achievement-protocol.md` §3.4.
+    public var codingKey: any CodingKey { FactCodingKey(stringValue: rawValue) }
+
+    public init?<K: CodingKey>(codingKey: K) {
+        self.init(rawValue: codingKey.stringValue)
+    }
+
+    private struct FactCodingKey: CodingKey {
+        let stringValue: String
+        var intValue: Int? { nil }
+        init(stringValue: String) { self.stringValue = stringValue }
+        init?(intValue: Int) { nil }
+    }
 }
 
 /// Where a check-in came from. A frozen closed set, and therefore one of the

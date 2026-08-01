@@ -21,20 +21,27 @@ import SwiftUI
 /// Full monochrome was drawn and explicitly not recommended: colour is the only
 /// thing that distinguishes two rows at a glance for someone tapping without
 /// looking.
-struct HabitTint: Equatable {
+///
+/// **It is `public` because there are two surfaces now.** The Home Screen widget
+/// is a separate target drawing the same rows, and a second copy of these eight
+/// values would be two things that can disagree — with the wrong one being the
+/// one nobody is looking at. Same argument as `Projection.habitCap` and
+/// `TodaySnapshot.spineLength`: the number lives once, and everything that needs
+/// it reads it from where it lives.
+public struct HabitTint: Equatable, Sendable {
 
     /// The checked row's field in a light appearance.
-    let field: Color
+    public let field: Color
 
     /// The checked row's field in a dark appearance.
-    let fieldDark: Color
+    public let fieldDark: Color
 
-    func field(for scheme: ColorScheme) -> Color {
+    public func field(for scheme: ColorScheme) -> Color {
         scheme == .dark ? fieldDark : field
     }
 
     /// Paper. The label and the mark on a checked row, in both appearances.
-    static let paper = rgb(242, 239, 232)   // #F2EFE8
+    public static let paper = rgb(242, 239, 232)   // #F2EFE8
 
     /// The four habits, in the order `Projection.activeHabits` returns them.
     ///
@@ -78,7 +85,7 @@ struct HabitTint: Equatable {
     /// has fired and stays fired — six values chosen to satisfy a contrast
     /// measurement are what the owner looks at every morning as soon as the
     /// habits are done, and nobody has yet looked at them as colours.
-    static let palette: [HabitTint] = [
+    public static let palette: [HabitTint] = [
         // teal   — #1B6B7A given;  #40C8E0 x 0.34 = rgb(22, 68, 76) given
         HabitTint(field: rgb(27, 107, 122), fieldDark: rgb(22, 68, 76)),
         // orange — #8A4E00 given;  #FF9F0A x 0.34
@@ -89,13 +96,13 @@ struct HabitTint: Equatable {
         HabitTint(field: rgb(183, 32, 61), fieldDark: rgb(87, 19, 32)),
     ]
 
-    static func tint(at index: Int) -> HabitTint {
+    public static func tint(at index: Int) -> HabitTint {
         palette[index % palette.count]
     }
 
     /// sRGB, written as bytes because that is how every value above was read
     /// off the design and computed.
-    static func rgb(_ red: Int, _ green: Int, _ blue: Int) -> Color {
+    public static func rgb(_ red: Int, _ green: Int, _ blue: Int) -> Color {
         Color(.sRGB, red: Double(red) / 255, green: Double(green) / 255, blue: Double(blue) / 255)
     }
 }

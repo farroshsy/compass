@@ -20,3 +20,8 @@ compass-habit-tracker-design/
 
 # Design handoff archives
 *design-handoff.zip
+
+# Python bytecode — the standalone verifier is a script, not a package, and its
+# cache is a build artifact of running it.
+__pycache__/
+*.pyc

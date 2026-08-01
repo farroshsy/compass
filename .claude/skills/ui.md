@@ -59,6 +59,22 @@ Four, because four is what installs — `AppComposition.seededHabits`, and
   badges are banned below.
 - Banned outright: confetti, particles, sparkles, coins, points, levels, XP,
   rarity tiers, progress bars toward the next milestone.
+- **The certificate has one animation and no haptic.** The design bundle asks for
+  a second (the seal scaling 1.035 → 1.0) and for a `.soft` haptic on issue.
+  Neither ships: line 46 above enumerates exactly one, and nothing authorises the
+  haptic. `memory/decisions.md` 2026-08-01. Overturn in writing there, not by
+  re-reading the design bundle.
+- **The certificate's strings are the ones written above, literally.** The design
+  renders three different treatments of the attestation line across three turns —
+  full stops, two lines, one sentence — and none of them is this file's. This
+  file is frozen and wins.
+- **The claim uses the relative metric**, `.system(.largeTitle, design: .serif)`.
+  A superseded turn's build-spec table gives `.system(size: 34, design: .serif)`;
+  a fixed point size does not respond to Dynamic Type and voids the whole
+  accessibility pass. It is the table most likely to be copied verbatim.
+- **A certificate-list row re-presents the certificate; it never pushes.** The
+  design draws a chevron, and a chevron inside a `NavigationStack` is the detail
+  screen `docs/product.md` cut from v1 coming back through the side door.
 - The certificate uses a serif face (`.system(.largeTitle, design: .serif)`).
   It is doing the entire visual argument for "document" rather than "token".
 - Exactly one `ShareLink`, on the certificate, rendered via `ImageRenderer`.
@@ -70,6 +86,20 @@ Four, because four is what installs — `AppComposition.seededHabits`, and
   unsayable. Once — not a badge, not a nag, not on Today.
 - Never show a wallet, address, gas, chain name, seed phrase, or the word
   "mint". If a feature cannot be made invisible, it does not ship.
+- **The widget follows the same rules, and shares the palette rather than
+  copying it.** `HabitTint` is `public` from week 2 for exactly that reason: eight
+  colour values in two places are two things that can disagree, and the wrong one
+  is the one nobody is looking at. The whole row is the button, an unchecked row
+  is `Color.primary.opacity(0.06)` with no hue, colour appears on the check, the
+  mark is a rounded square and never `checkmark.circle.fill`, and the number under
+  the rows is days recorded and never the streak.
+- **One widget family, `.systemSmall`.** Every extra family is another layout that
+  has to stay correct for one user. It is a `StaticConfiguration`: nothing about
+  it is configurable, because a configuration intent would put the first decision
+  in the loop on the Home Screen.
+- **The widget's whole refresh policy is the 04:00 boundary.** Everything it draws
+  is a fact about today, so `.after(nextDayStart)` is the entire timeline — no
+  guessed interval and no periodic wake-up.
 - **No notifications. None.** The earlier rule here mandated one local
   notification at a fixed hour, cancelled when the day completes — which is a
   streak-defence notification by function, and `docs/product.md` lists

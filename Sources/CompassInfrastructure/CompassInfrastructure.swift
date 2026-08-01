@@ -21,8 +21,21 @@
 //                         knowing its high-water mark — were unprotected.
 //                         `App/` is now a shell with no logic in it. §2, §4, §6.
 //
-// Still to land here, in build order (`docs/technical.md` §11): the hand-written
-// canonical byte encoding, `content_hash` and `prev` chaining with the one-time
-// `reproject` hatch, the App Group container move and `actor EventLog` (week
-// 1b); `Seal.swift` and `Calendar.swift` copied in from the `before` repository
-// with an attribution header, and never `Log.persist()` (weeks 3 and 4).
+//   Signer.swift          copied from `before` in week 3, with both §8 fixes and
+//                         without `sign(_ text:)`, which double-hashes.
+//   Calendars.swift       copied from `before` in week 4, with its
+//                         first-success-wins behaviour fixed **during** the
+//                         copy: ADR 0004 requires all three, not the first.
+//   OpenTimestamps.swift  the proof format, by hand. Needed because holding
+//                         three answers in one artifact and asking for an
+//                         upgrade both require the format itself.
+//   Anchoring.swift       the weekly log-head anchor, the 72-hour gate, the
+//                         upgrade pass, and the `Attestor` adapter. §9.8.
+//   AnchorScheduler.swift the `BGProcessingTask` half. Deliberately thin: it is
+//                         the half no test can watch.
+//
+// `Log.persist()` from `before` is **not** copied and never will be — it
+// rewrites the whole array on every append. §1, ADR 0002.
+//
+// Everything in `docs/technical.md` §11's build order has now landed. What is
+// owed is in `memory/known-bugs.md`, and it needs a phone rather than a file.

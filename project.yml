@@ -16,6 +16,21 @@ options:
   bundleIdPrefix: dev.farros.compass
   deploymentTarget:
     iOS: "18.0"
+
+# **Both version keys, at the project level, so the two targets cannot drift.**
+#
+# Neither target declared them until week 2, and nothing noticed: an app installs
+# on the simulator without them. An **app extension** does not — iOS refuses with
+# "Failed to create app extension placeholder", because the version keys are what
+# it matches an extension to its host with, and they have to be equal. Setting
+# them here rather than twice is what makes "equal" true by construction.
+#
+# `CURRENT_PROJECT_VERSION` is the build number that has to increase for every
+# TestFlight upload — see the ninety-day rule in `.claude/skills/ios.md`.
+settings:
+  base:
+    MARKETING_VERSION: "1.0"
+    CURRENT_PROJECT_VERSION: "1"
 packages:
   compass:
     path: .
@@ -25,6 +40,8 @@ targets:
     platform: iOS
     sources:
       - path: App
+        excludes:
+          - Compass.entitlements
     dependencies:
       - package: compass
         product: CompassUI
@@ -32,6 +49,11 @@ targets:
         product: CompassInfrastructure
       - package: compass
         product: CompassDomain
+      # The widget extension, embedded in the app. An extension is installed and
+      # updated with its host, which is also why the ninety-day TestFlight rule in
+      # `.claude/skills/ios.md` says update in place and never delete: deleting
+      # the app destroys the App Group container both of these write to.
+      - target: CompassWidget
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: dev.farros.compass
@@ -47,6 +69,81 @@ targets:
         # PNGs are re-encoded without one on the way into the catalogue rather
         # than shipped as exported.
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        # The App Group the store moved into in week 1b — `docs/technical.md`
+        # §6, and `App/Compass.entitlements` for why. A widget cannot read a
+        # container it has no access to, and the widget ships in week 2.
+        #
+        # A build signed without a profile carrying this group still runs:
+        # `AppComposition.storeURL` falls back to the app's own Documents
+        # directory. §6 refuses to let the paid developer account gate storage
+        # code, and this is the line that keeps that true.
+        CODE_SIGN_ENTITLEMENTS: App/Compass.entitlements
+    # Week 4. Two array-valued keys, and they need a real plist file.
+    #
+    # `BGTaskScheduler.register` **throws at launch** when its identifier is not
+    # in `BGTaskSchedulerPermittedIdentifiers`, and the system will not run a
+    # processing task without the background mode. Both were first written as
+    # `INFOPLIST_KEY_` build settings, which is what the rest of this target
+    # uses — and `plutil -p .build/products/Compass.app/Info.plist` showed
+    # neither key in the built product. The generated-plist mechanism knows a
+    # fixed set of keys and **silently drops the rest**; nothing warns.
+    #
+    # Measured rather than assumed, and recorded here because the failure it
+    # would have caused is exactly the one the corpus is most afraid of: the
+    # scheduler would have thrown on every launch, and `.claude/skills/ui.md`
+    # forbids anchoring failure from being visible anywhere, so the app would
+    # have looked completely normal while half of `docs/technical.md` §9.8 was
+    # dead. This file merges *over* the generated one — the same arrangement the
+    # widget target below already uses — so `GENERATE_INFOPLIST_FILE` stays on
+    # and the launch screen, the display name and the icon keys are unaffected.
+    info:
+      path: App/Info.plist
+      properties:
+        UIBackgroundModes: [processing]
+        BGTaskSchedulerPermittedIdentifiers: [dev.farros.compass.anchor]
+
+  # Week 2 — the interactive Home Screen widget, and the **second writer**.
+  # `docs/technical.md` §4 and §11.
+  #
+  # `Widget/` is a shell in exactly the sense `App/` is: an `AppIntent`
+  # conformance, a timeline provider and a view, with every line that can be
+  # wrong living in `CompassInfrastructure` where `swift test` compiles it.
+  #
+  # It carries the **same App Group** as the app, which is what makes it a second
+  # writer on one file rather than a second app with its own empty store. It has
+  # its own `device` UUID, its own `lamport` sequence and its own `prev` chain —
+  # `writer-widget.id` beside `writer-app.id` in the container.
+  CompassWidget:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: Widget
+        excludes:
+          - CompassWidget.entitlements
+    dependencies:
+      - package: compass
+        product: CompassUI
+      - package: compass
+        product: CompassInfrastructure
+      - package: compass
+        product: CompassDomain
+      - sdk: WidgetKit.framework
+      - sdk: SwiftUI.framework
+      - sdk: AppIntents.framework
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.farros.compass.widget
+        GENERATE_INFOPLIST_FILE: true
+        INFOPLIST_KEY_CFBundleDisplayName: Compass
+        SWIFT_VERSION: "6.0"
+        TARGETED_DEVICE_FAMILY: "1,2"
+        SKIP_INSTALL: YES
+        CODE_SIGN_ENTITLEMENTS: Widget/CompassWidget.entitlements
+    info:
+      path: Widget/Info.plist
+      properties:
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
 
 # Building it, re-measured on this machine on 2026-07-31. This works, icon and
 # all:

@@ -104,6 +104,28 @@ public struct HabitState: Hashable, Sendable {
         self.archivalDays = [:]
     }
 
+    /// Rehydrates one row from the launch cache. See
+    /// ``Projection/restored(from:)`` for what such a value does and does not
+    /// describe.
+    ///
+    /// It is here rather than beside the snapshot because the properties above
+    /// are `private(set)` and this file is what that word means. Every
+    /// last-writer-wins register is deliberately left unset: an `EventOrder`
+    /// invented for a cache would be a claim about a write that never happened.
+    init(
+        restoring id: HabitID,
+        name: String,
+        isArchived: Bool,
+        checkedDays: Set<Day>,
+        createdOn: Day?
+    ) {
+        self.init(id: id)
+        self.name = name
+        self.isArchived = isArchived
+        self.checkedDays = checkedDays
+        self.createdOn = createdOn
+    }
+
     public func isChecked(on day: Day) -> Bool {
         checkedDays.contains(day)
     }
@@ -419,6 +441,12 @@ public struct Projection: Hashable, Sendable {
         copy.merge(other)
         return copy
     }
+
+    /// Puts one rehydrated row in place. See ``restored(from:)``; ``habits`` is
+    /// `private(set)` and this file is what that word means.
+    mutating func restore(_ habit: HabitState) {
+        habits[habit.id] = habit
+    }
 }
 
 /// Folds a list of events into state. Pure and total.
@@ -484,6 +512,14 @@ public struct SubjectName: Hashable, Sendable {
         if let order, !(order < event.order) { return }
         value = name
         order = event.order
+    }
+
+    /// Rehydrates the declared name from the launch cache, leaving the register
+    /// unset so the first real declaration to arrive wins. See
+    /// ``Projection/restored(from:)``; ``value`` is `private(set)` and this file
+    /// is what that word means.
+    mutating func restore(_ declared: String) {
+        value = declared
     }
 }
 

@@ -60,17 +60,44 @@ public struct TodayView: View {
             // has nothing to scroll.
             .scrollBounceBehavior(.basedOnSize)
         }
-        .task {
+        // **Once on appearance, and again every time the app becomes active.**
+        // `.task(id:)` re-runs when the id changes, so this is the same two lines
+        // the plain `.task` ran plus the case that did not exist until week 2.
+        //
+        // A plain `.task` runs once for the life of the view, which was right
+        // while this process was the only writer: nothing could change the log
+        // while the app sat in the background. The widget is a second process
+        // appending to the same file, so returning to the foreground now means
+        // returning to a log this process has not read. Without the re-run, a
+        // habit pressed in the widget renders unchecked for as long as the app
+        // stays alive — the screen saying something that did not happen, on the
+        // one screen the whole project is about.
+        //
+        // Re-reconciling also re-primes the journal's Lamport clock, so the next
+        // tap sorts after the widget's presses instead of tying with them and
+        // being decided by which random UUID is larger. See
+        // `CompassInfrastructure`'s `EventJournal.prime(_:)`.
+        .task(id: scenePhase) {
+            guard scenePhase == .active else { return }
             model.refreshDay()
             await model.reconcile()
-        }
-        .onChange(of: scenePhase) { _, phase in
-            if phase == .active { model.refreshDay() }
         }
         // The one surface reachable from here. A `.sheet` over Today, never a
         // `NavigationStack` on the launch path. `.claude/skills/ui.md`.
         .sheet(isPresented: $isShowingSettings) {
             SettingsView(model: model)
+        }
+        // Surface 2. A `.fullScreenCover` over Today, because the certificate is
+        // full-bleed paper — the screen *is* the sheet, which is why the seal has
+        // nothing to float above.
+        //
+        // **It is raised by the engine and by nothing else here.** `ui.md`: "The
+        // card is not re-shown unprompted." Dismissal clears the identifier, and
+        // the only other way it is ever set is a row in the certificate list.
+        .certificateCover(item: $model.presented) { id in
+            if let presentation = model.certificate(id) {
+                CertificateView(presentation: presentation) { model.presented = nil }
+            }
         }
     }
 

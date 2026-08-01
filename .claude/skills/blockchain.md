@@ -27,6 +27,16 @@ constitution wins.
   anchoring works, and the trigger in `docs/technical.md` §10 has fired.
 - OpenTimestamps first, always. Free, walletless, already written in
   `BeforeKit`, and it is what makes an `attainedAt` date credible.
+  - **Shipped in week 4**, and the inherited `Calendars.anchor(_:)` was **wrong
+    for this project**: it returned the first proof and dropped the other two,
+    while ADR 0004 requires all three. Fixed during the copy.
+  - **"Three independent chances to upgrade" is two.** Measured on the first real
+    submission, 2026-08-01: `a.pool.opentimestamps.org` is a pool and routed to
+    `alice`, so three requests reached two operators. Do not quote the number
+    three as a durability guarantee. `memory/known-bugs.md`.
+  - **A proof cannot be recomputed, only re-obtained, and a re-obtained one is
+    later and therefore weaker.** Never discard one, never replace one with a
+    fresh submission, never tidy `anchors.jsonl` or `attestations.jsonl`.
 - Never on chain: check-ins, habit names, notes, tap timestamps, timezone,
   device IDs, or anything mutable.
 - On chain per achievement, write-once: `commitment`, `milestoneKind`,
