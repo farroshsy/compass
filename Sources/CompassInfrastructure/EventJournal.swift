@@ -410,8 +410,19 @@ public struct JournalReader: Sendable {
                 chain: ChainVerification(heads: [:], breaks: [])
             )
         }
+        return JournalReader.read(try Data(contentsOf: url))
+    }
 
-        let data = try Data(contentsOf: url)
+    /// The same read, over bytes that are already in memory.
+    ///
+    /// It exists because `Exporter` builds the bundle in memory and then has to
+    /// fold `habits.json` out of **the exact `events.jsonl` bytes it is about to
+    /// hand over** — not out of a second read of the live file, which a tap
+    /// landing mid-export can change underneath it. Splitting a JSON Lines log
+    /// into events is the one thing this type knows how to do, and a second
+    /// implementation of it inside the exporter would be two answers to what a
+    /// torn line is.
+    public static func read(_ data: Data) -> JournalRead {
         let segments = data.split(separator: 0x0A, omittingEmptySubsequences: false)
 
         // A file ending in a newline yields a trailing empty segment; anything

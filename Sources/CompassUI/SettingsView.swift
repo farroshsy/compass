@@ -54,6 +54,26 @@ public struct SettingsView: View {
     /// plain value with tests behind it.
     @State private var presentedCertificate: AchievementID?
 
+    /// The bundle waiting for `fileExporter`, or `nil`.
+    ///
+    /// Presentation, not behaviour: setting it opens the system sheet and
+    /// clearing it closes one. **What** it holds is
+    /// ``CompassUI/TodayModel/export()``, and what the sheet says about it is
+    /// ``SettingsCopy`` — both of which are values a test drives directly. That
+    /// split is the rule `.claude/skills/architecture.md` states, and the reason
+    /// it states it is that two data bugs lived in `@State` in this exact file.
+    @State private var exportDocument: BundleDocument?
+
+    /// The sentence under the export button when something went wrong, or `nil`.
+    /// Cleared when the button is pressed again — an old failure beside a fresh
+    /// attempt is a lie about the fresh one.
+    @State private var exportProblem: String?
+
+    /// `true` while the bundle is being built. It digests every file in the
+    /// store, so on a long log it is not instant, and a button that looks inert
+    /// invites a second press.
+    @State private var isExporting = false
+
     @Environment(\.dismiss) private var dismiss
 
     public init(model: TodayModel) {
@@ -69,8 +89,28 @@ public struct SettingsView: View {
                 if !model.removedHabits.isEmpty { removedSection }
                 if !model.certificates.isEmpty { certificatesSection }
                 nameSection
+                exportSection
             }
             .navigationTitle("Settings")
+            // **`fileExporter`, and deliberately not `ShareLink`.**
+            // `.claude/skills/ui.md` reserves the single `ShareLink` for the
+            // certificate, and `docs/product.md` builds the certificate's whole
+            // justification on being the one thing you hand to someone. This
+            // writes a bundle to wherever the user keeps files; the app never
+            // learns where, and asks for no folder permission.
+            .fileExporter(
+                isPresented: exportIsPresented,
+                document: exportDocument,
+                contentType: .folder,
+                defaultFilename: exportDocument.map {
+                    SettingsCopy.exportFilename(at: $0.bundle.exportedAt)
+                }
+            ) { result in
+                exportDocument = nil
+                if case .failure(let error) = result {
+                    exportProblem = SettingsCopy.exportNotSaved(reason: "\(error)")
+                }
+            }
             // **Surface 2 re-presented, never a fourth surface.**
             //
             // `docs/product.md` cut "a separate certificate detail screen" from
@@ -253,6 +293,79 @@ public struct SettingsView: View {
         } footer: {
             Text(SettingsCopy.certificatesFooter)
         }
+    }
+
+    // MARK: Export
+
+    /// The control `docs/product.md` has budgeted for this sheet since the first
+    /// draft — "Rename, archive, export" — and which had no surface at all until
+    /// 2026-08-01.
+    ///
+    /// `Exporter` was written in week 1, tested from week 1, and reachable from
+    /// nothing: `grep` found no call site outside its own test file. Every bundle
+    /// this project has ever verified, including the one the standalone verifier
+    /// was first run against, was produced by a helper process written beside the
+    /// app. That makes `docs/product.md`'s mission sentence — a record "you can
+    /// hand to a stranger" — unreachable from the product, which is a different
+    /// and worse thing than unimplemented.
+    ///
+    /// It is the **last** section on the sheet, below the declared name, because
+    /// it is the one thing here that is not part of the daily loop and
+    /// `.claude/skills/ui.md` puts everything off the launch path behind
+    /// deliberate reach.
+    private var exportSection: some View {
+        Section {
+            Button {
+                startExport()
+            } label: {
+                HStack {
+                    Text(SettingsCopy.exportButton)
+                    if isExporting {
+                        Spacer(minLength: 12)
+                        ProgressView()
+                    }
+                }
+            }
+            .disabled(isExporting)
+
+            if let exportProblem {
+                // Said once, plainly, where the user asked for the file. This is
+                // not the anchoring case `.claude/skills/ui.md` keeps silent —
+                // that one is a background pass nobody requested, and this is a
+                // button somebody just pressed.
+                Text(exportProblem)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+        } header: {
+            Text("Export")
+        } footer: {
+            Text(SettingsCopy.exportFooter)
+        }
+    }
+
+    /// Builds the bundle off the main actor's critical path and hands it to the
+    /// exporter. Every decision it makes lives in ``TodayModel/export()``.
+    private func startExport() {
+        exportProblem = nil
+        isExporting = true
+        Task { @MainActor in
+            defer { isExporting = false }
+            switch await model.export() {
+            case .ready(let bundle): exportDocument = BundleDocument(bundle: bundle)
+            case .failed(let message): exportProblem = message
+            }
+        }
+    }
+
+    /// `fileExporter` takes a `Bool` binding and an optional document, and the
+    /// two have to agree. Deriving the flag from the document is what stops them
+    /// disagreeing — a `true` with no document presents an empty sheet.
+    private var exportIsPresented: Binding<Bool> {
+        Binding(
+            get: { exportDocument != nil },
+            set: { if !$0 { exportDocument = nil } }
+        )
     }
 
     // MARK: The declared name

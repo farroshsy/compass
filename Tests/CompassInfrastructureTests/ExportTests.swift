@@ -232,4 +232,110 @@ struct ExportTests {
             }
         }
     }
+
+    // MARK: The settings sheet's export — the same bundle, by construction
+
+    /// **The bundle the settings sheet hands to `fileExporter` is the bundle
+    /// this suite has been checking since week 1, file for file and byte for
+    /// byte.**
+    ///
+    /// That is the assertion the export control needs and the one a surface
+    /// cannot make about itself. `Exporter.bundle(at:)` is the single place that
+    /// decides what a bundle contains; ``CompassInfrastructure/Exporter/export(to:at:)``
+    /// writes what it returns and adds nothing. This walks the directory that was
+    /// written and requires the two to agree in **both** directions, which is
+    /// what makes it a comparison rather than a spot check.
+    ///
+    /// Both directions matter for a specific reason: the in-memory form is what
+    /// the user receives, so a member only the disk writer produces is a member
+    /// the user never gets, and a member only the in-memory form produces is one
+    /// no test in this suite has ever looked at.
+    @Test("the in-memory bundle is exactly the bundle export writes to disk")
+    func theInMemoryBundleIsTheWrittenBundle() throws {
+        try withTemporaryStore { store in
+            try seed(store)
+            try withTemporaryStore { elsewhere in
+                let directory = elsewhere.storeURL
+                    .appendingPathComponent("bundle", isDirectory: true)
+                let exporter = Exporter(layout: store)
+                try exporter.export(to: directory, at: exportedAt)
+                let inMemory = try exporter.bundle(at: exportedAt)
+
+                var onDisk: [String: Data] = [:]
+                for path in try FileManager.default.subpathsOfDirectory(atPath: directory.path) {
+                    let url = directory.appendingPathComponent(path)
+                    var isDirectory: ObjCBool = false
+                    guard FileManager.default.fileExists(
+                        atPath: url.path, isDirectory: &isDirectory
+                    ), !isDirectory.boolValue else { continue }
+                    onDisk[path] = try Data(contentsOf: url)
+                }
+
+                #expect(inMemory.files.keys.sorted() == onDisk.keys.sorted())
+                for (name, bytes) in onDisk {
+                    #expect(inMemory.files[name] == bytes, "\(name) differs")
+                }
+                // `manifest.json` is in the in-memory form too — it is the member
+                // a reader checks first, and a bundle handed over without it is
+                // one nothing can check at all.
+                #expect(inMemory.files[BundleFile.manifest] != nil)
+                #expect(inMemory.exportedAt == exportedAt)
+            }
+        }
+    }
+
+    /// A bundle written from **the in-memory form alone** verifies.
+    ///
+    /// The test above proves the two forms agree. This proves the form the
+    /// settings sheet actually produces is a bundle rather than a dictionary that
+    /// happens to match one: a manifest that digests every member, and every
+    /// digest recomputed from what was written.
+    @Test("a bundle written from the in-memory form alone verifies")
+    func theInMemoryBundleStandsOnItsOwn() throws {
+        try withTemporaryStore { store in
+            try seed(store)
+            try withTemporaryStore { elsewhere in
+                let bundle = try Exporter(layout: store).bundle(at: exportedAt)
+                let directory = elsewhere.storeURL
+                    .appendingPathComponent("handed-over", isDirectory: true)
+
+                // Exactly what `BundleDocument` does with the same value, and
+                // nothing else: create the directory a path names, write the
+                // bytes under it.
+                for (path, data) in bundle.files.sorted(by: { $0.key < $1.key }) {
+                    let url = directory.appendingPathComponent(path)
+                    try FileManager.default.createDirectory(
+                        at: url.deletingLastPathComponent(), withIntermediateDirectories: true
+                    )
+                    try data.write(to: url)
+                }
+
+                try Exporter(layout: store).verify(bundleAt: directory)
+            }
+        }
+    }
+
+    /// The composition root wires it, which is the difference between a port that
+    /// exists and a control that works.
+    ///
+    /// `App/` is not compiled by `swift test` and the settings sheet is a `View`
+    /// no test can drive, so this is the last link of the chain anything can
+    /// assert: a launch produces a store whose ``CompassDomain/Exporting`` port
+    /// returns the same bundle `Exporter` does. Deleting the `exporting:`
+    /// argument in `Composition.swift` fails here and nowhere else.
+    @Test("a composed launch can export, and exports the same bundle")
+    func theComposedStoreExports() async throws {
+        try await withTemporaryStoreAsync { layout in
+            try seed(layout)
+            let clock = frozenClock(at: "2026-07-31T09:00:00+07:00")
+            let store = AppComposition.compose(storeURL: layout.storeURL, clock: clock)
+
+            let exporting = try #require(store.exporting)
+            let viaPort = try await exporting.exportBundle()
+            let direct = try Exporter(layout: layout).bundle(at: clock.now())
+
+            #expect(viaPort.files == direct.files)
+            #expect(viaPort.exportedAt == clock.now())
+        }
+    }
 }

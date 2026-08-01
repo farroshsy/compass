@@ -40,6 +40,38 @@ in 23 suites passed". The fix was extracting `SettingsEdits`, and the rule is
 now in `.claude/skills/architecture.md`: **behaviour goes in a plain value
 beside the `View`; the `View` keeps the layout.**
 
+### The verifier computed the evidence root over the wrong leaf order
+
+Fixed on 2026-08-01, in `verifier/compass-verify.py`. Recorded because the shape
+is the most dangerous one in this project: **a check that agrees only when the
+data is tidy.**
+
+`evidence_for` collected the qualifying events by iterating `days` and handed the
+result straight to `evidence_root`, so the Merkle leaves were in **day** order.
+`docs/achievement-protocol.md` §4.1 freezes them in `(lamport, device)` order and
+says nothing about days. `EvidenceRoot.root(over:)` on the Swift side was right
+all along, so the spec and the app agreed and only the second reader was wrong.
+
+**It passed every test the suite had, and could not have failed one.** Every
+bundle `VerifierTests` produced was one writer's check-ins appended one day after
+another, and on such a log day order *is* `(lamport, device)` order — the two
+readings are indistinguishable. The defect only appears when one day holds
+several events written out of sequence, which the widget and the app make routine
+the moment both exist (`docs/technical.md` §4). On the fixture built to show it:
+
+```
+leaves in day order        a433e65b3ecfa118f24e9de7e0d358aa71ba10a02be819b9840b8761e52a4ebe
+leaves in (lamport,device) fa44093f0a0375029ebefc102a5a9e8568db74678e7cc006527856b390c036b4  ← the app, and §4.1
+```
+
+The rule this leaves behind: **when an artefact exists to check another one, at
+least one fixture must be built so that two plausible readings of the
+specification give different answers.** A passing suite of tidy fixtures is
+evidence about the fixtures. `VerifierTests.evidenceLeavesAreInTotalOrderNotDayOrder`
+is that fixture, it asserts that the two candidate roots differ before it asserts
+which one was reached, and with the fix reverted on either side it is the only
+one of 483 tests that fails.
+
 ---
 
 ## Known-untested, and running

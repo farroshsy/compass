@@ -8,6 +8,10 @@ single-user iOS habit tracker whose real subject is what it takes to produce a
 personal record that a stranger can check without trusting the app or its
 author. Judge it as you would a small systems project, not as a startup.
 
+Its engineering claims are reproducible. Its product assumptions are largely
+untested: there has been no sustained real-world use, and the Limitations
+section below should be read before the rest.
+
 ---
 
 ## The engineering questions it answers
@@ -88,8 +92,9 @@ path is how a tool gets trusted for things it does not do.
 
 ## Limitations
 
-**Days of real use: zero.** The app has never been opened on a phone. Every
-design decision is untested against the only user it has.
+**No sustained real-world use.** All work has been validated through tests and
+simulator execution rather than daily use on a physical device. Every design
+decision is untested against the only user the app has.
 
 **Verification demand is unvalidated.** No evidence is offered that anyone wants
 a cryptographically checkable habit record. The demand is assumed.
@@ -115,7 +120,7 @@ day. That was a deliberate choice by the owner, recorded with its cost in
 
 ---
 
-## Design trade-offs
+## Non-goals and trade-offs
 
 **The blockchain layer exists as a learning objective, not a product
 requirement.** `docs/adr/0001` states the alternative plainly: for a single

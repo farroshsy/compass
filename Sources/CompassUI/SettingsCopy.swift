@@ -1,3 +1,5 @@
+import Foundation
+
 /// The sentences the settings sheet says, in one place, so that what the app
 /// claims is a thing a test can read.
 ///
@@ -81,6 +83,70 @@ public enum SettingsCopy {
 
     /// A revoked row's title and tag, at 45% ink. No colour, no icon.
     public static let revokedInk: Double = 0.45
+
+    // MARK: Export
+
+    /// The control `docs/product.md` budgets for this sheet — "Rename, archive,
+    /// **export**" — and which had no surface until 2026-08-01.
+    public static let exportButton = "Export a copy"
+
+    /// What the bundle is, in the terms a person can act on.
+    ///
+    /// Every word here is checked by `SettingsTests` against
+    /// ``unearnedClaims``, so it does not say "seal", "proof" or "signature"
+    /// even though the bundle contains all three — the sheet describes what the
+    /// file *is*, and the claims about what it proves are the certificate's and
+    /// the verifier's to make.
+    ///
+    /// The last sentence is the point of the whole feature and is the mission
+    /// sentence in the user's own words.
+    public static let exportFooter = """
+        Writes out everything this app holds — the log, the records it has \
+        issued, the timestamp files, and a list of digests so a reader can tell \
+        the copy is intact. You choose where it goes; it does not leave the \
+        phone until you do. Anyone can check it with the script in the \
+        repository, without this app.
+        """
+
+    /// The default filename offered to the exporter: `Compass-2026-08-01`.
+    ///
+    /// A civil date and nothing else. No time, because two exports on one day
+    /// are the same day's record and the system already refuses to silently
+    /// overwrite; no name, because the declared name is optional, unverified,
+    /// and a filename travels further than most fields do — the same argument
+    /// `docs/achievement-protocol.md` §3.4 makes about `rule.id`.
+    ///
+    /// It is computed here rather than in the view for the reason every other
+    /// decision in this sheet is: a `View` is not a thing a test can drive.
+    public static func exportFilename(at instant: Date, in zone: TimeZone = .current) -> String {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = zone
+        let parts = calendar.dateComponents([.year, .month, .day], from: instant)
+        return String(
+            format: "Compass-%04d-%02d-%02d",
+            parts.year ?? 0, parts.month ?? 0, parts.day ?? 0
+        )
+    }
+
+    /// The store never opened, so there is nothing to copy. The same condition
+    /// ``TodayModel/isStoreAvailable`` reports on Today, said where the user
+    /// asked for a file.
+    public static let exportUnavailable =
+        "There is nothing to export: this app could not open its own store."
+
+    /// A bundle that could not be built. The reason is included verbatim because
+    /// there is nobody to file a report with — one person, one phone — and a
+    /// message that says only "something went wrong" is a message that costs a
+    /// future session the whole diagnosis.
+    public static func exportFailed(reason: String) -> String {
+        "The copy could not be written: \(reason)"
+    }
+
+    /// The exporter itself failed, after the bundle was built — the user
+    /// cancelled, or the destination refused it.
+    public static func exportNotSaved(reason: String) -> String {
+        "The copy was not saved: \(reason)"
+    }
 
     /// Vocabulary this build has not earned. A claim that the record is sealed,
     /// chained, anchored or tamper-evident is a claim about cryptography that
