@@ -53,6 +53,38 @@ public struct SystemClock: Clock {
         return SystemClock.unixEpochDay.adding(SystemClock.floorDiv(shifted, 86_400))
     }
 
+    /// The instant the civil day after `date` begins — the next 04:00 local.
+    ///
+    /// **The widget's redraw moment, and nothing else's.** A Home Screen widget
+    /// renders from a timeline WidgetKit asks for in advance, so it has to say
+    /// when what it drew stops being true. Everything on it is a fact about
+    /// *today*, and the only scheduled moment today stops being today is the
+    /// boundary — so this is the whole refresh policy, with no guessed interval,
+    /// no periodic wake-up and no push.
+    ///
+    /// The offset is resolved **twice**, deliberately. Adding a day's worth of
+    /// seconds to an instant is wrong across a DST transition by exactly the hour
+    /// that moved: the first pass finds the candidate using the offset in force
+    /// now, and the second corrects it using the offset in force there.
+    /// `SystemClockTests` pins the property rather than the arithmetic — the
+    /// result is the first instant of the next civil day, and one second earlier
+    /// is still this one.
+    public func nextDayStart(
+        after date: Date, cutoffHour: Int = DayBoundary.cutoffHour
+    ) -> Date {
+        let tomorrow = day(for: date, cutoffHour: cutoffHour).adding(1)
+        let localSeconds = (tomorrow - SystemClock.unixEpochDay) * 86_400 + cutoffHour * 3_600
+
+        func instant(usingOffsetAt reference: Date) -> Date {
+            Date(
+                timeIntervalSince1970:
+                    Double(localSeconds - timeZone.secondsFromGMT(for: reference))
+            )
+        }
+
+        return instant(usingOffsetAt: instant(usingOffsetAt: date))
+    }
+
     /// The device's UTC offset in minutes at `date`, for `Event.zoneOffset`.
     ///
     /// The ``Clock`` port in `docs/technical.md` §2 declares only `now()` and

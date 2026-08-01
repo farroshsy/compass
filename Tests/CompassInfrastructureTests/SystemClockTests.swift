@@ -98,4 +98,56 @@ struct SystemClockTests {
         #expect(utc.day(for: instant("1970-01-01T02:00:00+00:00")) == day("1969-12-31"))
         #expect(utc.day(for: instant("1970-01-01T04:00:00+00:00")) == day("1970-01-01"))
     }
+
+    // MARK: When the widget has to redraw
+
+    /// The widget's whole refresh policy is one instant: the moment what it drew
+    /// stops being true. Everything on it is a fact about today, so that moment
+    /// is the 04:00 boundary and nothing else.
+    ///
+    /// These assert the **property** rather than the arithmetic — the answer is
+    /// the first instant of the next civil day, and one second earlier is still
+    /// this one — because that is the sentence the widget depends on, and the one
+    /// that has to survive a timezone doing something awkward.
+    @Test("the next day starts at the next 04:00, and not a second earlier")
+    func nextDayStartIsTheBoundary() {
+        for iso in [
+            "2026-07-31T09:00:00+07:00",   // an ordinary afternoon
+            "2026-07-31T03:59:59+07:00",   // one second before the roll
+            "2026-07-31T04:00:00+07:00",   // exactly on it
+            "2026-07-31T23:59:59+07:00",   // late evening
+            "2026-07-31T01:30:00+07:00",   // the 01:30 case the boundary exists for
+        ] {
+            let now = instant(iso)
+            let next = clock.nextDayStart(after: now)
+
+            #expect(next > now, "\(iso): the redraw moment is in the past")
+            #expect(clock.day(for: next) == clock.day(for: now).adding(1), "\(iso)")
+            #expect(clock.day(for: next.addingTimeInterval(-1)) == clock.day(for: now), "\(iso)")
+        }
+    }
+
+    @Test("the redraw moment survives both DST transitions")
+    func nextDayStartAcrossDST() {
+        // The hour that moves is exactly the error `addingTimeInterval(86_400)`
+        // would make, and a widget that redrew an hour late would show yesterday's
+        // booleans on the one morning of the year the user is most likely to
+        // notice.
+        let newYork = SystemClock(timeZone: TimeZone(identifier: "America/New_York")!)
+        for iso in [
+            "2026-03-07T12:00:00-05:00",   // the day before spring forward
+            "2026-03-08T12:00:00-04:00",   // the day of
+            "2026-10-31T12:00:00-04:00",   // the day before fall back
+            "2026-11-01T12:00:00-05:00",   // the day of
+        ] {
+            let now = instant(iso)
+            let next = newYork.nextDayStart(after: now)
+
+            #expect(next > now, "\(iso): the redraw moment is in the past")
+            #expect(newYork.day(for: next) == newYork.day(for: now).adding(1), "\(iso)")
+            #expect(
+                newYork.day(for: next.addingTimeInterval(-1)) == newYork.day(for: now), "\(iso)"
+            )
+        }
+    }
 }

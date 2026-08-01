@@ -60,6 +60,28 @@ public enum SettingsCopy {
         evidence that the name is true.
         """
 
+    /// The certificate list — surface 3, and the reason the card never has to be
+    /// re-shown unprompted.
+    ///
+    /// **"Sealed on this device" is a claim this build has earned**, and week 1a's
+    /// build had not: `AchievementIssuer` signs every award with the P-256 key in
+    /// the same pass that records it, `docs/achievement-protocol.md` §7.1 step 2.
+    /// Nothing here says *anchored*, because nothing is: the calendars are week 4,
+    /// and anchoring language before `AnchorState == .confirmed` is the one thing
+    /// `.claude/skills/ui.md` names twice.
+    ///
+    /// The last clause is the append-only rule in the user's own terms. A row that
+    /// disappeared would be the app quietly rewriting its own record, which is
+    /// exactly what the whole apparatus exists to make impossible.
+    public static let certificatesFooter = """
+        Issued once, when a milestone falls out of the log. Each one is sealed on \
+        this device and carries its full digest. Nothing here is ever removed — a \
+        record whose days later changed is marked as such and keeps its place.
+        """
+
+    /// A revoked row's title and tag, at 45% ink. No colour, no icon.
+    public static let revokedInk: Double = 0.45
+
     /// Vocabulary this build has not earned. A claim that the record is sealed,
     /// chained, anchored or tamper-evident is a claim about cryptography that
     /// does not ship until week 1b.

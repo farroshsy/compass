@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!--
+	The same App Group as the app, and it must stay the same string.
+	`docs/technical.md` §6 and §4.
+
+	This is what makes the widget a second *writer on one file* rather than a
+	second app with its own empty store: `AppComposition.storeURL` resolves to
+	this container in both processes, and `events.jsonl` inside it is the one
+	truth they share. Two writer identities live beside it — `writer-app.id` and
+	`writer-widget.id` — because `device` means writer, not phone.
+
+	Unlike the app, the fallback in `AppComposition.storeURL` does not save this
+	target: a widget extension cannot read the app's Documents directory at all.
+	So a build signed without a profile carrying this group gives the app a
+	working store and the widget an empty screen, which is what
+	`AppComposition.widgetScreen` draws and says out loud.
+	-->
+	<key>com.apple.security.application-groups</key>
+	<array>
+		<string>group.dev.farros.compass</string>
+	</array>
+</dict>
+</plist>

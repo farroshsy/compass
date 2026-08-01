@@ -1,0 +1,41 @@
+[
+  {
+    "id": "total.recorded.100",
+    "version": 1,
+    "kind": "total",
+    "scope": {
+      "requiresAll": false
+    },
+    "threshold": 100,
+    "neutralDaysBridge": false,
+    "repeatPolicy": "once",
+    "titleKey": "rule.total.100",
+    "fallbackTitle": "100 days recorded"
+  },
+  {
+    "id": "total.recorded.500",
+    "version": 1,
+    "kind": "total",
+    "scope": {
+      "requiresAll": false
+    },
+    "threshold": 500,
+    "neutralDaysBridge": false,
+    "repeatPolicy": "once",
+    "titleKey": "rule.total.500",
+    "fallbackTitle": "500 days recorded"
+  },
+  {
+    "id": "total.recorded.1000",
+    "version": 1,
+    "kind": "total",
+    "scope": {
+      "requiresAll": false
+    },
+    "threshold": 1000,
+    "neutralDaysBridge": false,
+    "repeatPolicy": "once",
+    "titleKey": "rule.total.1000",
+    "fallbackTitle": "1000 days recorded"
+  }
+]

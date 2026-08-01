@@ -9,10 +9,15 @@ import SwiftUI
 /// hard-to-reach glyph, and never presented unprompted. Nothing here is on the
 /// launch path and nothing here may move onto it.
 ///
-/// Four things live here in this build: the habits — renamed in place and
-/// removed — adding one, restoring a removed one, and the optional declared name.
-/// `docs/product.md` also budgets export and the certificate list for this sheet;
-/// neither is built yet, and this file is where they land when they are.
+/// Five things live here in this build: the habits — renamed in place and
+/// removed — adding one, restoring a removed one, the **certificate list**, and
+/// the optional declared name. `docs/product.md` also budgets export for this
+/// sheet; that is the one thing still missing, and this file is where it lands.
+///
+/// The certificate list is surface 3 and it re-presents surface 2 rather than
+/// pushing anything: `docs/product.md` cut a separate certificate detail screen
+/// from v1 explicitly so it could not be smuggled back in as already designed,
+/// and a chevron inside a `NavigationStack` is exactly how it would come back.
 ///
 /// ### Why rename is a text field and not a screen
 ///
@@ -44,6 +49,11 @@ public struct SettingsView: View {
     /// data bugs lived in those properties, where nothing could test them.
     @State private var edits: SettingsEdits
 
+    /// Which certificate the list is showing, if any. It holds an identifier and
+    /// no decision — what the certificate *says* is `CertificateCopy`, which is a
+    /// plain value with tests behind it.
+    @State private var presentedCertificate: AchievementID?
+
     @Environment(\.dismiss) private var dismiss
 
     public init(model: TodayModel) {
@@ -57,9 +67,25 @@ public struct SettingsView: View {
                 habitsSection
                 addSection
                 if !model.removedHabits.isEmpty { removedSection }
+                if !model.certificates.isEmpty { certificatesSection }
                 nameSection
             }
             .navigationTitle("Settings")
+            // **Surface 2 re-presented, never a fourth surface.**
+            //
+            // `docs/product.md` cut "a separate certificate detail screen" from
+            // v1 explicitly "so they are not smuggled back in as already
+            // designed", and budgets exactly three surfaces. The design draws a
+            // chevron on each row, and a chevron inside a `NavigationStack` is a
+            // push — which is how the cut screen comes back. So the row presents
+            // the same `CertificateView` the milestone raises, over this sheet.
+            .certificateCover(item: $presentedCertificate) { id in
+                if let presentation = model.certificate(id) {
+                    CertificateView(presentation: presentation) {
+                        presentedCertificate = nil
+                    }
+                }
+            }
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     // Committing first: a name typed and not submitted is an edit
@@ -161,6 +187,71 @@ public struct SettingsView: View {
             Text("Removed")
         } footer: {
             Text(model.mayAddHabit ? SettingsCopy.removedFooter : SettingsCopy.removedFooterAtCap)
+        }
+    }
+
+    // MARK: The certificate list
+
+    /// Surface 3, and the reason the card does not have to be re-shown
+    /// unprompted: it is where a certificate stays reachable after it is
+    /// dismissed, and where the single `ShareLink` stays reachable with it.
+    ///
+    /// **Plain reverse-chronological rows, and no "new" indicator** — a "new"
+    /// badge is a re-engagement affordance and badges are banned.
+    ///
+    /// A **revoked entry keeps its place.** Its title drops to 45% ink, its
+    /// subtitle says what happened, and an uppercase tag replaces the chevron.
+    /// No colour, no icon, and no offer to fix it: you never erase a published
+    /// entry, you post a reversal, and the list is where the reversal is read.
+    private var certificatesSection: some View {
+        Section {
+            ForEach(model.certificates, id: \.id) { achievement in
+                let isRevoked = model.book.isRevoked(achievement.id)
+                Button {
+                    presentedCertificate = achievement.id
+                } label: {
+                    HStack(spacing: 12) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(
+                                CertificateCopy.listTitle(
+                                    for: achievement, names: model.habitNames
+                                )
+                            )
+                            .foregroundStyle(
+                                Color.primary.opacity(isRevoked ? SettingsCopy.revokedInk : 1)
+                            )
+                            Text(
+                                isRevoked
+                                    ? CertificateCopy.revokedSubtitle
+                                    : CertificateCopy.listSubtitle(for: achievement)
+                            )
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                        }
+                        Spacer(minLength: 8)
+                        if isRevoked {
+                            Text(CertificateCopy.revokedTag)
+                                .font(.system(size: 10.5, weight: .semibold))
+                                .tracking(0.9)
+                                .textCase(.uppercase)
+                                .foregroundStyle(
+                                    Color.primary.opacity(SettingsCopy.revokedInk)
+                                )
+                        } else {
+                            Image(systemName: "chevron.right")
+                                .font(.footnote.weight(.semibold))
+                                .foregroundStyle(.tertiary)
+                        }
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityHint(isRevoked ? CertificateCopy.revokedSubtitle : "Opens the record")
+            }
+        } header: {
+            Text("Records")
+        } footer: {
+            Text(SettingsCopy.certificatesFooter)
         }
     }
 

@@ -70,7 +70,18 @@ public enum AppComposition {
         (HabitID(rawValue: "habit-d"), "Reflect"),
     ]
 
-    /// Week 1a's base URL: the app's own Documents directory.
+    /// The App Group the store lives in from week 1b. `docs/technical.md` §6.
+    ///
+    /// It must move before the widget ships in week 2, because a widget cannot
+    /// read a container it has no access to — and §6 is equally clear that the
+    /// entitlement this needs must not be a gate on storage code, since an
+    /// entitlement needs a provisioning profile which needs the paid developer
+    /// account, and "day one is where projects die". Hence the fallback in
+    /// ``storeURL``.
+    public static let appGroupIdentifier = "group.dev.farros.compass"
+
+    /// Week 1a's base URL: the app's own Documents directory, and now the
+    /// fallback when the App Group container is not reachable.
     ///
     /// iCloud device backup is **deliberately left enabled** —
     /// `isExcludedFromBackup` is not set — because until CloudKit sync exists it
@@ -80,6 +91,87 @@ public enum AppComposition {
     public static var documentsStoreURL: URL {
         let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
         return documents.appendingPathComponent("Compass", isDirectory: true)
+    }
+
+    /// The App Group container's store, or `nil` when the container is not
+    /// reachable — no entitlement, or a build signed without one.
+    public static var appGroupStoreURL: URL? {
+        FileManager.default
+            .containerURL(forSecurityApplicationGroupIdentifier: appGroupIdentifier)?
+            .appendingPathComponent("Compass", isDirectory: true)
+    }
+
+    /// **The single injected base URL.** `docs/technical.md` §6,
+    /// `.claude/skills/architecture.md`: every path in the codebase obtains its
+    /// base from here, and no file path is constructed anywhere else. That rule
+    /// is what made this one line the whole of the move.
+    ///
+    /// It prefers the App Group container and falls back to Documents. The
+    /// fallback is not a hedge, it is §6's stated requirement: "one overstated
+    /// sentence turned a purchase into a hard gate on all storage code, for a
+    /// project whose documented failure mode is that day one is where projects
+    /// die." A build with no entitlement still runs, still records, and still
+    /// keeps every event — it simply cannot be read by a widget, which does not
+    /// exist until week 2.
+    public static var storeURL: URL {
+        appGroupStoreURL ?? documentsStoreURL
+    }
+
+    /// Moves a Documents-era store into the App Group container, once.
+    ///
+    /// **Existing data survives every change** — `PROJECT_CONSTITUTION.md` §5 —
+    /// so nothing is deleted here. The files are copied across and the old
+    /// directory is then renamed rather than removed: if anything about this is
+    /// wrong, the week-1a log is still sitting on disk under a name that says
+    /// what happened to it.
+    ///
+    /// It is a no-op in every case but the one it is for: no container, no old
+    /// store, or a container that already holds a log.
+    @discardableResult
+    static func moveToAppGroupIfNeeded(
+        from source: URL = AppComposition.documentsStoreURL,
+        to destination: URL? = AppComposition.appGroupStoreURL
+    ) -> Bool {
+        let manager = FileManager.default
+        guard let destination, destination != source else { return false }
+        guard manager.fileExists(atPath: source.path) else { return false }
+
+        // A container that already holds a log is the normal case from the
+        // second launch onwards. Deciding on the log rather than on the
+        // directory matters: `StoreLayout.prepare()` creates the directory, so
+        // its existence proves nothing about whether anything is in it.
+        let events = StoreLayout(storeURL: destination).events
+        guard !manager.fileExists(atPath: events.path) else { return false }
+
+        do {
+            try StoreLayout(storeURL: destination).prepare()
+            for name in try manager.contentsOfDirectory(atPath: source.path) {
+                let target = destination.appendingPathComponent(name)
+                guard !manager.fileExists(atPath: target.path) else { continue }
+                try manager.copyItem(at: source.appendingPathComponent(name), to: target)
+            }
+            // Renamed, never removed. The copy above is the migration; this is
+            // only what stops it happening twice.
+            //
+            // A name already in use is not a reason to overwrite it: whatever is
+            // sitting there is a previous store that somebody kept, and this
+            // method exists to not lose one.
+            let parent = source.deletingLastPathComponent()
+            var kept = parent.appendingPathComponent("Compass.moved-to-group", isDirectory: true)
+            if manager.fileExists(atPath: kept.path) {
+                kept = parent.appendingPathComponent(
+                    "Compass.moved-to-group-\(UUID().uuidString)", isDirectory: true
+                )
+            }
+            try manager.moveItem(at: source, to: kept)
+            return true
+        } catch {
+            // A half-copied container is not a loss: the source is untouched,
+            // the next launch tries again, and every file it did copy is skipped
+            // because it is already there. Failing loudly here would refuse to
+            // launch, which §6 forbids.
+            return false
+        }
     }
 
     /// Builds the store, the writer identity, the journal and the clock, seeds
@@ -95,40 +187,108 @@ public enum AppComposition {
     /// to launch", so a store that cannot be opened produces a degraded launch,
     /// never a crash.
     public static func compose(
-        storeURL: URL = AppComposition.documentsStoreURL,
+        storeURL: URL = AppComposition.storeURL,
         clock: SystemClock = SystemClock(),
         writer: String = WriterIdentity.app
     ) -> ComposedStore {
+        // The file move that goes with the one-line URL change above.
+        // `docs/technical.md` §6: "Switching that URL from `.documentDirectory`
+        // to `FileManager.containerURL(forSecurityApplicationGroupIdentifier:)`
+        // is then one line plus a file move, and it MUST happen before the
+        // widget ships in week 2."
+        //
+        // It runs only when the default is in play. A caller that named its own
+        // `storeURL` — every test, and any future second store — is not
+        // migrating anything, and moving a directory out from under it would be
+        // this function reaching outside what it was asked to compose.
+        if storeURL == AppComposition.storeURL {
+            moveToAppGroupIfNeeded()
+        }
+
         // The single injected `storeURL`. No file path is constructed anywhere
-        // else in the codebase, which is what makes switching this one line to
-        // `FileManager.containerURL(forSecurityApplicationGroupIdentifier:)` a
-        // one-line change plus a file move. It MUST move before the widget ships
-        // in week 2. `docs/technical.md` §6.
+        // else in the codebase, which is what made that move one line here and
+        // nothing anywhere else. `docs/technical.md` §6.
         let layout = StoreLayout(storeURL: storeURL)
 
         do {
             let identity = try WriterIdentity(layout: layout, writer: writer).load()
 
-            // One read, two results. The first frame renders from `read.events`,
-            // and `read.highWaterMarks` is this writer's `lamport` mark — so the
-            // journal starts already knowing where its sequence resumes and the
-            // first tap of the process does not decode the whole log on the main
-            // actor. `docs/technical.md` §4 requires those synchronous steps to
-            // be microseconds; §6 measures a full decode at 193 ms at five years
-            // and 865 ms at ten.
+            // **Before anything opens the log for appending.** The one-time
+            // hatch in `docs/technical.md` §11 replays a week-1a log — every
+            // event carrying `prev = genesis`, because the canonical encoding
+            // did not exist when they were written — into a freshly chained one,
+            // keeping the original as `events.jsonl.pre-chain`. It is idempotent
+            // by construction: once it has run the chain verifies, and a log
+            // whose chain verifies needs nothing. It closes permanently the
+            // moment anything is signed.
+            //
+            // Its outcome is deliberately not branched on here. Every value it
+            // can return leaves a log this composition can open and this app can
+            // use: a refusal leaves the week-1a log exactly as it was, and the
+            // journal then chains forward from the last event it can read, which
+            // `JournalRead.chain` reports as one break at the boundary rather
+            // than hiding. What is genuinely missing is a *surface* saying so —
+            // recorded in `memory/known-bugs.md` beside the damaged-log notice
+            // §6 owes, which is the same missing surface.
+            try Reprojector(layout: layout).reprojectIfNeeded()
+
+            // The launch cache, read synchronously and moved to today. It is a
+            // hit on every launch after the first, including the ordinary
+            // daily-driver case of opening the app the morning after — the strip
+            // slides and today's booleans clear.
+            let today = clock.today(cutoffHour: DayBoundary.cutoffHour)
+            let cached = SnapshotStore(layout: layout).read()?.rolledForward(to: today)
+
+            // A cache with no habits in it cannot be the first frame: a fresh
+            // install must fall through to the seed below, and a launch that
+            // rendered four empty rows would look exactly like one that lost
+            // them.
+            if let cached, !cached.habits.isEmpty {
+                // **Nothing decodes the log here.** The journal starts unprimed
+                // and `EventLog.replay()` — the `.task` immediately after the
+                // first frame — hands it the resume it read anyway. If a tap
+                // beats that replay, the journal recovers under the advisory
+                // `flock` instead, which is the cold-start path §4 describes.
+                let journal = try EventJournal(layout: layout, writer: identity, clock: clock)
+                let log = EventLog(layout: layout, clock: clock, priming: journal)
+                return ComposedStore(
+                    events: [], clock: clock, recorder: journal, source: log,
+                    snapshot: cached, absorber: log,
+                    awarding: AchievementIssuer(
+                        layout: layout, recorder: journal, clock: clock
+                    ),
+                    // Week 4. It is constructed on every launch and makes no
+                    // request until something is actually due, which is what
+                    // lets `TodayModel` call it on every foreground.
+                    anchoring: AnchorPipeline(layout: layout, clock: clock)
+                )
+            }
+
+            // No usable cache: first launch, or it was deleted. One read, two
+            // results — the first frame renders from `read.events`, and
+            // `read.resume(for:)` is this writer's `lamport` mark **and its
+            // chain head**, so the journal starts already knowing where its
+            // sequence resumes and what its next `prev` is.
             let read = try JournalReader(url: layout.events).read()
             let journal = try EventJournal(
                 layout: layout,
                 writer: identity,
                 clock: clock,
-                highWaterMark: read.highWaterMarks[identity] ?? 0
+                resume: read.resume(for: identity)
             )
+            let log = EventLog(layout: layout, clock: clock, priming: journal)
 
             var events = read.events
             events.append(contentsOf: try seedIfEmpty(events, into: journal, clock: clock))
 
             return ComposedStore(
-                events: events, clock: clock, recorder: journal, source: journal
+                events: events, clock: clock, recorder: journal, source: log, absorber: log,
+                // Week 3's line 5. It reads the log itself rather than taking a
+                // projection, because `witness.evidenceRoot` is built from the
+                // qualifying events' `content_hash` and a projection has no
+                // events in it. `docs/achievement-protocol.md` §4.1.
+                awarding: AchievementIssuer(layout: layout, recorder: journal, clock: clock),
+                anchoring: AnchorPipeline(layout: layout, clock: clock)
             )
         } catch {
             // `docs/technical.md` §6: **never refuse to launch.** A

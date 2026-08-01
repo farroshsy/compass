@@ -1,10 +1,15 @@
 # Seal assets
 
 Vendored from the design handoff (`compass-habit-tracker-design/`, which is
-gitignored — it is a zip, not source). **Nothing here is wired into the build
-yet.** `CertificateView` is week 3, per `docs/technical.md` §11, and cannot be
-built meaningfully before it: there is no rule engine, nothing sealed, and no
-`evidenceRoot` to derive the impression from.
+gitignored — it is a zip, not source).
+
+**Wired into the build in week 3.** The four die frames are copied into
+`Sources/CompassUI/SealFrames/` and loaded by `SealView`, which strikes the 64
+cells over them. This directory stays as the provenance record and the comparison
+targets; it is not itself a build input. `reference/matrix-*` are **never**
+linked into a target, and `SealTests` reads the source tree to enforce that —
+the bundle-only version of that check passed with a render sitting in the
+repository.
 
 ## What ships
 
@@ -27,8 +32,16 @@ than the render, the walls do not curve, there is no displaced lip around each
 cell, and beside the reference stills it is visibly cheaper. That is the right
 trade.
 
-Shipping size is 168pt — validated as holding down to 160pt and merging at
-120pt. At AX5 it drops to 120pt, because it is a graphic and not text.
+Shipping size is 168pt. **The "holds to 160pt, merges at 120pt" finding was
+measured on the superseded 4 x 7 twenty-eight-cell device**, and it is carried
+forward here for provenance rather than as evidence about the shipped one: the 8 x
+8 device is more than twice as dense, and at 120pt its cell falls to 6.14pt with a
+1pt shadow and a 1pt highlight on it.
+
+At AX5 it drops to 120pt, because it is a graphic and not text. That size was
+rendered and looked at on the simulator on 2026-08-01 — the cells stay separated
+rather than merging, but the field reads as texture rather than as data. That is a
+look, not a measurement, and `memory/known-bugs.md` keeps it open.
 
 ## What the cells encode
 

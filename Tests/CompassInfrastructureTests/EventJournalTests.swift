@@ -185,8 +185,20 @@ struct EventJournalTests {
         }
     }
 
-    @Test("an undecodable line never moves another writer's sequence")
-    func marksArePerWriter() throws {
+    @Test("the marks are per writer; the clock resumed from them is not")
+    func marksArePerWriterAndTheClockIsShared() throws {
+        // Two things are kept apart here that used to be conflated.
+        //
+        // ``JournalRead/highWaterMarks`` is genuinely per writer: one writer's
+        // line, decodable or not, never appears under another's key, and neither
+        // does its chain head. What ``JournalRead/resume(for:)`` hands a writer is
+        // a **Lamport clock** — the maximum over all of them — because
+        // `docs/technical.md` §3 justifies the total order with "Lamport first so
+        // causality holds", and a per-writer serial number carries no causality.
+        //
+        // This test asserted the opposite until week 2, when a second writer made
+        // the difference observable. See ``theClockCarriesCausality`` for what it
+        // cost.
         try withTemporaryStore { layout in
             let app = try EventJournal(layout: layout, writer: writerApp, clock: frozenClock())
             try app.record(kind: .checkedIn, day: day("2026-07-30"), source: .tap,
@@ -206,15 +218,96 @@ struct EventJournalTests {
             #expect(read.highWaterMarks[writerApp] == 1)
             #expect(read.highWaterMarks[writerWidget] == 9)
 
-            // Per-writer chains fail independently: the widget's unreadable line
-            // does not push the app's counter forward.
+            // The head stays this writer's own. The widget's line is not on the
+            // app's chain and can never become its `prev`.
+            let resume = read.resume(for: writerApp)
+            #expect(resume.head == read.chain.head(of: writerApp))
+            #expect(resume.head != EventChain.genesis)
+
+            // The clock advances past the widget's line even though nothing here
+            // can read it: an undecodable line is still a line this writer has
+            // seen, and stamping under it would place a later event before it.
             let restarted = try EventJournal(
                 layout: layout, writer: writerApp, clock: frozenClock()
             )
             let resumed = try restarted.record(
                 kind: .checkedIn, day: day("2026-08-01"), source: .tap, payload: .habit(habitA)
             )
-            #expect(resumed.lamport == 2)
+            #expect(resumed.lamport == 10)
+            #expect(resumed.prev == read.chain.head(of: writerApp))
+        }
+    }
+
+    @Test("a writer that has read another's event never sorts before it")
+    func theClockCarriesCausality() throws {
+        // The product meaning, stated as the fold sees it: **the most recent
+        // press wins.** That is only true if the clock advances past what the
+        // writer has read, because `docs/technical.md` §3 resolves the
+        // `(habit, day)` cell last-writer-wins under `(lamport, device)`.
+        //
+        // Without it this is the week-2 bug in three lines: the app reaches
+        // `lamport 6`, a cold widget starts at `1`, the user presses the widget to
+        // un-check, and `(6, app)` beats `(1, widget)` — so the revocation is on
+        // disk, inside the chain, and discarded by the fold. Not delayed:
+        // discarded, for as long as the log exists.
+        try withTemporaryStore { layout in
+            let app = try EventJournal(layout: layout, writer: writerApp, clock: frozenClock())
+            for offset in 0..<5 {
+                try app.record(kind: .checkedIn, day: day("2026-07-01").adding(offset),
+                               source: .tap, payload: .habit(habitA))
+            }
+            let checkedIn = try app.record(kind: .checkedIn, day: day("2026-07-31"),
+                                           source: .tap, payload: .habit(habitA))
+
+            // A cold second writer that has never written a line.
+            let widget = try EventJournal(
+                layout: layout, writer: writerWidget, clock: frozenClock()
+            )
+            let revoked = try widget.record(kind: .checkInRevoked, day: day("2026-07-31"),
+                                            payload: .habit(habitA))
+
+            #expect(checkedIn.order < revoked.order, "the later press sorted first")
+
+            let projection = project(try JournalReader(url: layout.events).read().events)
+            #expect(
+                projection.isChecked(habitA, on: day("2026-07-31")) == false,
+                "the widget's un-check was discarded by the fold"
+            )
+        }
+    }
+
+    @Test("a long-lived writer picks up the other's clock when it replays")
+    func primingRaisesTheClockButNeverMovesTheHead() throws {
+        // The app process survives a background period with a `lamport` from
+        // whenever it was last primed, while the widget keeps appending. Its next
+        // tap must still sort after everything the replay just read — otherwise
+        // the tap the user made a second ago loses to a widget press from ten
+        // minutes ago, decided by which random UUID sorts higher.
+        try withTemporaryStore { layout in
+            let app = try EventJournal(layout: layout, writer: writerApp, clock: frozenClock())
+            let first = try app.record(kind: .checkedIn, day: day("2026-07-01"),
+                                       source: .tap, payload: .habit(habitA))
+
+            // The widget appends, in another process, unseen by `app`.
+            let widget = try EventJournal(
+                layout: layout, writer: writerWidget, clock: frozenClock()
+            )
+            for offset in 0..<7 {
+                try widget.record(kind: .checkedIn, day: day("2026-07-02").adding(offset),
+                                  source: .widget, payload: .habit(habitB))
+            }
+
+            // The app replays — `EventLog.replay()` hands the answer to `prime`.
+            let read = try JournalReader(url: layout.events).read()
+            app.prime(read.resume(for: writerApp))
+
+            let next = try app.record(kind: .checkedIn, day: day("2026-07-31"),
+                                      source: .tap, payload: .habit(habitA))
+            #expect(next.lamport == 9, "the clock did not pick up the other writer")
+
+            // And the head did not move: this writer's chain is still its own.
+            #expect(try next.prev == first.contentHash)
+            #expect(try JournalReader(url: layout.events).read().chain.isIntact)
         }
     }
 
@@ -234,33 +327,43 @@ struct EventJournalTests {
             }
             seed.close()
 
-            // Exactly what `App/CompassApp.swift` does: one read, two results.
+            // Exactly what the composition root does: one read, two results.
             let read = try JournalReader(url: layout.events).read()
             let primed = try EventJournal(
                 layout: layout, writer: writerApp, clock: frozenClock(),
-                highWaterMark: read.highWaterMarks[writerApp] ?? 0
+                resume: read.resume(for: writerApp)
             )
-            #expect(try primed.record(kind: .checkedIn, day: day("2026-07-04"),
-                                      source: .tap, payload: .habit(habitA)).lamport == 4)
+            let next = try primed.record(kind: .checkedIn, day: day("2026-07-04"),
+                                         source: .tap, payload: .habit(habitA))
+            #expect(next.lamport == 4)
+            // Primed does not mean unchained: the resume carries the head too,
+            // so the fourth event links to the third exactly as if the tail had
+            // been read here.
+            #expect(next.prev == read.chain.head(of: writerApp))
 
             let stamps = try stampsOnDisk(layout)
             #expect(Set(stamps).count == stamps.count)
+            #expect(try JournalReader(url: layout.events).read().chain.isIntact)
         }
 
-        // The proof that nothing was read: prime with a mark the file disagrees
-        // with, and the primed value is what the first write uses. Only a
-        // journal that never opened the log can behave this way.
+        // The proof that nothing was read: prime with a resume the file
+        // disagrees with, and the primed value is what the first write uses.
+        // Only a journal that never opened the log can behave this way.
         try withTemporaryStore { layout in
             let seed = try EventJournal(layout: layout, writer: writerApp, clock: frozenClock())
             try seed.record(kind: .checkedIn, day: day("2026-07-01"), source: .tap,
                             payload: .habit(habitA))
             seed.close()
 
+            let invented = Data(repeating: 0xC5, count: 32)
             let primed = try EventJournal(
-                layout: layout, writer: writerApp, clock: frozenClock(), highWaterMark: 40
+                layout: layout, writer: writerApp, clock: frozenClock(),
+                resume: WriterResume(lamport: 40, head: invented)
             )
-            #expect(try primed.record(kind: .checkedIn, day: day("2026-07-02"),
-                                      source: .tap, payload: .habit(habitA)).lamport == 41)
+            let written = try primed.record(kind: .checkedIn, day: day("2026-07-02"),
+                                            source: .tap, payload: .habit(habitA))
+            #expect(written.lamport == 41)
+            #expect(written.prev == invented)
         }
     }
 
@@ -308,7 +411,15 @@ struct EventJournalTests {
 
             for writer in [writerApp, writerWidget] {
                 let mine = read.events.filter { $0.device == writer }.map(\.lamport)
-                #expect(mine == Array(1...50))
+                #expect(mine.count == 50)
+                // Strictly increasing, never restarting, never repeating. It is
+                // deliberately **not** `1...50`: the clock is a Lamport clock and
+                // advances past the other writer's marks, so the two sequences
+                // interleave rather than running side by side. A writer whose
+                // events were 1...50 would be one that never looked at the other,
+                // which is the ordering bug week 2 found.
+                #expect(zip(mine, mine.dropFirst()).allSatisfy { $0 < $1 })
+                #expect(mine.first ?? 0 >= 1)
             }
 
             let projection = project(read.events)
@@ -362,6 +473,40 @@ struct EventJournalTests {
         }
     }
 
+    @Test("a journal never stamps underneath an event it appended itself")
+    func appendAdvancesTheClock() throws {
+        // ``EventJournal/appendSync(_:)`` is the ``EventSink`` port: it writes an
+        // event this writer did not stamp, verbatim. Verbatim is about the line —
+        // nothing is renumbered and no `prev` is rewritten — and it is **not**
+        // about the clock. This process has now seen that event, so whatever it
+        // stamps next must sort after it, exactly as if it had read the line back
+        // off disk. Otherwise a foreign event installed here outranks the tap the
+        // user makes immediately afterwards, and `docs/technical.md` §3 resolves
+        // the `(habit, day)` cell last-writer-wins under that order.
+        try withTemporaryStore { layout in
+            let journal = try EventJournal(
+                layout: layout, writer: writerApp, clock: frozenClock(),
+                resume: .fresh
+            )
+            let mine = try journal.record(kind: .checkedIn, day: day("2026-07-30"),
+                                          source: .tap, payload: .habit(habitA))
+            #expect(mine.lamport == 1)
+
+            let foreign = stamped(.checkedIn, device: writerWidget, lamport: 41,
+                                  on: "2026-07-31", payload: .habit(habitA))
+            try journal.appendSync(foreign)
+
+            let next = try journal.record(kind: .checkInRevoked, day: day("2026-07-31"),
+                                          payload: .habit(habitA))
+            #expect(next.lamport == 42, "the clock ignored an event this journal wrote")
+            #expect(foreign.order < next.order)
+
+            // The head is untouched by the foreign line: chains are per writer.
+            #expect(try next.prev == mine.contentHash)
+            #expect(try JournalReader(url: layout.events).read().chain.isIntact)
+        }
+    }
+
     // MARK: Damage
 
     @Test("truncating at every byte offset drops only the partial tail")
@@ -400,6 +545,13 @@ struct EventJournalTests {
                 #expect(read.events.count == expected, "offset \(cut) recovered the wrong count")
                 #expect(read.events == Array(whole.prefix(expected)), "offset \(cut) reordered")
                 #expect(read.droppedPartialTail == (cut > 0 && prefix.last != 0x0A))
+
+                // Week 1b: the surviving prefix is not merely a set of parseable
+                // lines, it is an unbroken chain. A crash mid-append leaves the
+                // writer's chain verifiable from its first event to its head —
+                // which is what makes the head safe to keep appending to, and
+                // what makes `witness.logHeads` mean something after a crash.
+                #expect(read.chain.isIntact, "offset \(cut) left a broken chain")
             }
         }
     }

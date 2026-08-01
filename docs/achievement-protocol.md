@@ -464,6 +464,40 @@ strong as a phone-made one.
 `ChainRecord`, if it ever exists, holds `chainId`, `contract`, `tokenId` and
 `txHash`. It is reserved here so that adding it later is not a format change.
 
+### 7.0 Two things week 4 found, reported rather than amended
+
+Both are recorded here rather than fixed, because this document is the one place
+a field may be added and `PROJECT_CONSTITUTION.md` §6 puts the achievement format
+outside what may change without an ADR and the human's agreement. Neither is
+blocking; both are things a reader of `attestations.jsonl` would otherwise
+misread.
+
+- **`calendar` is singular and `docs/adr/0004` requires three submissions.** The
+  implementation leaves it `nil` while `submitted` — there is no single calendar
+  to name, and the three pending attestations live inside `otsProof`, which is
+  the format's own way of holding them — and fills it in on `confirmed` with the
+  calendar whose branch delivered the Bitcoin path. That is the only moment the
+  field has one answer. The weekly log-head record, which this document does not
+  specify, carries `calendars` plural.
+- **`AchievementClaim` cannot produce an `Attestation`.** The `Attestor` port in
+  `docs/technical.md` §2 takes a claim — an ID and a digest — and returns an
+  `Attestation`, which requires `publicKey`, `signature` and `backing`. A
+  calendar supplies none of those. The implementation reads the sealed record it
+  is anchoring and returns it with the anchor added, which is what §7.1's
+  ordering already implies: `sealed` happens immediately and offline, and
+  `submitted` happens to a record that is already signed.
+
+### 7.1 bis — the weekly log-head anchor is not an achievement
+
+ADR 0004 requires the event-log head to be anchored weekly, and **that record is
+deliberately not specified in this document.** It is not an achievement: it has
+no rule, no `earnedOn`, no witness and no claim about a person. Filing it in
+`attestations.jsonl` would have meant minting a fake `AchievementID` to key it
+under, which is exactly the kind of invention this document exists to prevent.
+
+It lives in `anchors.jsonl` and its shape and canonical form are fixed in
+`docs/technical.md` §6.
+
 ### 7.1 Lifecycle
 
 1. **`provisional`** — the achievement is computed, recorded, and shown to the

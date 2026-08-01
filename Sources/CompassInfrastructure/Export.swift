@@ -29,16 +29,24 @@ import Foundation
 /// manifest.json             per-file SHA-256 digests, plus the export timestamp
 /// ```
 ///
-/// **What a week-1 bundle actually contains, and why the rest is missing.** Only
+/// **What a bundle actually contains, and why anything is missing.** Only
 /// artifacts belonging to features that exist are written. `events.jsonl`,
 /// `habits.json` and `manifest.json` always. `awards.jsonl`,
-/// `attestations.jsonl` and `rules/` are copied **if present**, so the day the
-/// week-3 engine writes them they are in the bundle with no change here.
-/// `publickey.pem`, `proofs/*.ots` and `salts.json` are derived from a signer, a
-/// calendar and a token that do not exist before weeks 3, 4 and the chain limb
-/// respectively; writing empty placeholders for them would be worse than
-/// omitting them, because a placeholder is indistinguishable from a real file
+/// `attestations.jsonl`, `anchors.jsonl` and `rules/` are copied **if present**,
+/// so the day a week writes one it is in the bundle with no change here.
+///
+/// `publickey.pem` and `proofs/*.ots` landed in **week 4** and are *derived*
+/// rather than copied: the key and the proof bytes live inside
+/// `attestations.jsonl` and `anchors.jsonl`, and are written out again in the
+/// forms the rest of the world reads. Only `salts.json` is still absent, because
+/// no token has ever been minted; writing an empty placeholder would be worse
+/// than omitting it, since a placeholder is indistinguishable from a real file
 /// that lost its contents.
+///
+/// **This is what the standalone verifier in `verifier/` is handed.** It shares
+/// no code with this file — every byte string it checks is rebuilt from the
+/// documents — so the bundle has to be complete rather than merely
+/// self-consistent.
 public struct Exporter: Sendable {
 
     public let layout: StoreLayout
@@ -65,16 +73,36 @@ public struct Exporter: Sendable {
         let events = try Data(contentsOfIfExists: layout.events) ?? Data()
         digests[BundleFile.events] = try write(events, to: destination, named: BundleFile.events)
 
-        // Copied if present. Nothing here writes them yet — weeks 3 and 4 do.
+        // Copied if present. `awards.jsonl` and `attestations.jsonl` arrived in
+        // week 3, `anchors.jsonl` in week 4.
         for (name, source) in [
             (BundleFile.awards, layout.awards),
             (BundleFile.attestations, layout.attestations),
+            (BundleFile.anchors, layout.anchors),
         ] {
             guard let data = try Data(contentsOfIfExists: source) else { continue }
             digests[name] = try write(data, to: destination, named: name)
         }
         for (name, data) in try filesInDirectory(layout.rules, prefixedWith: BundleFile.rules) {
             digests[name] = try write(data, to: destination, named: name)
+        }
+
+        // Week 4. Both are **derived** from the two files above rather than
+        // copied from the store: a proof lives inside its attestation as bytes,
+        // and the public key lives inside it as an X9.63 blob. They are written
+        // out separately because §8 lists them separately, and it lists them
+        // separately because a `.ots` file is the thing every other
+        // OpenTimestamps tool in the world can read, and a `.pem` is the thing
+        // every other verifier can read. A bundle whose proofs can only be
+        // extracted by code that already understands Compass would be a bundle
+        // that still requires trusting Compass.
+        for (name, data) in try proofFiles() {
+            digests[name] = try write(data, to: destination, named: name)
+        }
+        if let pem = try publicKeysPEM() {
+            digests[BundleFile.publicKey] = try write(
+                pem, to: destination, named: BundleFile.publicKey
+            )
         }
 
         // The name is resolved at render time from a mutable local mapping,
@@ -180,6 +208,7 @@ public struct Exporter: Sendable {
         case BundleFile.events: return layout.events
         case BundleFile.awards: return layout.awards
         case BundleFile.attestations: return layout.attestations
+        case BundleFile.anchors: return layout.anchors
         default:
             if components.count == 2, components[0] == BundleFile.rules {
                 return layout.rules.appendingPathComponent(String(components[1]))
@@ -200,6 +229,55 @@ public struct Exporter: Sendable {
             names[id.rawValue] = habit.name
         }
         return names
+    }
+
+    /// `proofs/*.ots` — every OpenTimestamps proof, as the detached files the
+    /// reference client reads. `docs/technical.md` §8, ADR 0004's fourth
+    /// mitigation: "store the upgraded proof in the export bundle".
+    ///
+    /// Names are the achievement's own identifier, and for a log-head anchor the
+    /// first sixteen hex characters of its digest. Both are already opaque —
+    /// `docs/achievement-protocol.md` §3.4 keeps display names out of every
+    /// identifier for exactly this reason, and a filename travels further than
+    /// most fields do.
+    private func proofFiles() throws -> [(String, Data)] {
+        let store = AwardStore(layout: layout)
+        var files: [(String, Data)] = []
+
+        for (id, attestation) in try store.readAttestations().sorted(by: { $0.key < $1.key }) {
+            guard let proof = attestation.otsProof, !proof.isEmpty else { continue }
+            files.append(("\(BundleFile.proofs)/\(id.rawValue).ots", proof))
+        }
+        for anchor in try store.readAnchors() {
+            guard let proof = anchor.otsProof, !proof.isEmpty else { continue }
+            let name = anchor.digest.prefix(8).map { String(format: "%02x", $0) }.joined()
+            files.append(("\(BundleFile.proofs)/log-heads-\(name).ots", proof))
+        }
+        return files.sorted { $0.0 < $1.0 }
+    }
+
+    /// `publickey.pem` — the P-256 public key(s), **including rotated ones**.
+    ///
+    /// Every distinct key that has ever signed something in this store, in the
+    /// order it first appears, as SPKI PEM. Plural is not decoration: the enclave
+    /// key does not survive device replacement, so a bundle spanning one carries
+    /// two unrelated keys — and `docs/technical.md` §8 requires a verifier to
+    /// report that case differently rather than to assume continuity.
+    private func publicKeysPEM() throws -> Data? {
+        var seen: [Data] = []
+        for (_, attestation) in try AwardStore(layout: layout)
+            .readAttestations()
+            .sorted(by: { $0.key < $1.key })
+        where !seen.contains(attestation.publicKey) {
+            seen.append(attestation.publicKey)
+        }
+        guard !seen.isEmpty else { return nil }
+
+        let pems = seen.compactMap {
+            try? P256.Signing.PublicKey(x963Representation: $0).pemRepresentation
+        }
+        guard !pems.isEmpty else { return nil }
+        return Data(pems.joined(separator: "\n").utf8)
     }
 
     private func filesInDirectory(
@@ -227,13 +305,19 @@ public struct Exporter: Sendable {
         return Exporter.sha256Hex(data)
     }
 
-    static func sha256Hex(_ data: Data) -> String {
+    /// Lowercase hex of a file's SHA-256, the form `manifest.json` carries.
+    ///
+    /// `public` so a test can rebuild a manifest by hand — which is what
+    /// `VerifierTests` needs in order to prove that the manifest is **not** the
+    /// defence: a forger who rewrites it still fails on the chain and on the
+    /// claim.
+    public static func sha256Hex(_ data: Data) -> String {
         SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
     }
 
     /// Sorted keys, no whitespace, no escaped slashes — so two exports of the
     /// same state produce the same bytes and therefore the same digest.
-    static func canonicalJSON(_ value: some Encodable) throws -> Data {
+    public static func canonicalJSON(_ value: some Encodable) throws -> Data {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
         return try encoder.encode(value)
@@ -245,8 +329,15 @@ public enum BundleFile {
     public static let events = "events.jsonl"
     public static let awards = "awards.jsonl"
     public static let attestations = "attestations.jsonl"
+    /// Week 4. The weekly log-head anchors — ADR 0004.
+    public static let anchors = "anchors.jsonl"
     public static let rules = "rules"
     public static let habits = "habits.json"
+    /// Week 4. `proofs/*.ots` — detached OpenTimestamps proofs, readable by any
+    /// OpenTimestamps client and not only by this one.
+    public static let proofs = "proofs"
+    /// Week 4. The P-256 public key(s), including rotated ones.
+    public static let publicKey = "publickey.pem"
     public static let manifest = "manifest.json"
 }
 

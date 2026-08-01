@@ -1,0 +1,282 @@
+[
+  {
+    "id": "streak.habit-a.7",
+    "version": 1,
+    "kind": "streak",
+    "scope": {
+      "habit": "habit-a",
+      "requiresAll": false
+    },
+    "threshold": 7,
+    "neutralDaysBridge": false,
+    "repeatPolicy": "once",
+    "titleKey": "rule.streak.7",
+    "fallbackTitle": "7 consecutive days"
+  },
+  {
+    "id": "streak.habit-a.30",
+    "version": 1,
+    "kind": "streak",
+    "scope": {
+      "habit": "habit-a",
+      "requiresAll": false
+    },
+    "threshold": 30,
+    "neutralDaysBridge": false,
+    "repeatPolicy": "once",
+    "titleKey": "rule.streak.30",
+    "fallbackTitle": "30 consecutive days"
+  },
+  {
+    "id": "streak.habit-a.100",
+    "version": 1,
+    "kind": "streak",
+    "scope": {
+      "habit": "habit-a",
+      "requiresAll": false
+    },
+    "threshold": 100,
+    "neutralDaysBridge": false,
+    "repeatPolicy": "once",
+    "titleKey": "rule.streak.100",
+    "fallbackTitle": "100 consecutive days"
+  },
+  {
+    "id": "streak.habit-a.365",
+    "version": 1,
+    "kind": "streak",
+    "scope": {
+      "habit": "habit-a",
+      "requiresAll": false
+    },
+    "threshold": 365,
+    "neutralDaysBridge": false,
+    "repeatPolicy": "once",
+    "titleKey": "rule.streak.365",
+    "fallbackTitle": "365 consecutive days"
+  },
+  {
+    "id": "streak.habit-a.1000",
+    "version": 1,
+    "kind": "streak",
+    "scope": {
+      "habit": "habit-a",
+      "requiresAll": false
+    },
+    "threshold": 1000,
+    "neutralDaysBridge": false,
+    "repeatPolicy": "once",
+    "titleKey": "rule.streak.1000",
+    "fallbackTitle": "1000 consecutive days"
+  },
+  {
+    "id": "streak.habit-b.7",
+    "version": 1,
+    "kind": "streak",
+    "scope": {
+      "habit": "habit-b",
+      "requiresAll": false
+    },
+    "threshold": 7,
+    "neutralDaysBridge": false,
+    "repeatPolicy": "once",
+    "titleKey": "rule.streak.7",
+    "fallbackTitle": "7 consecutive days"
+  },
+  {
+    "id": "streak.habit-b.30",
+    "version": 1,
+    "kind": "streak",
+    "scope": {
+      "habit": "habit-b",
+      "requiresAll": false
+    },
+    "threshold": 30,
+    "neutralDaysBridge": false,
+    "repeatPolicy": "once",
+    "titleKey": "rule.streak.30",
+    "fallbackTitle": "30 consecutive days"
+  },
+  {
+    "id": "streak.habit-b.100",
+    "version": 1,
+    "kind": "streak",
+    "scope": {
+      "habit": "habit-b",
+      "requiresAll": false
+    },
+    "threshold": 100,
+    "neutralDaysBridge": false,
+    "repeatPolicy": "once",
+    "titleKey": "rule.streak.100",
+    "fallbackTitle": "100 consecutive days"
+  },
+  {
+    "id": "streak.habit-b.365",
+    "version": 1,
+    "kind": "streak",
+    "scope": {
+      "habit": "habit-b",
+      "requiresAll": false
+    },
+    "threshold": 365,
+    "neutralDaysBridge": false,
+    "repeatPolicy": "once",
+    "titleKey": "rule.streak.365",
+    "fallbackTitle": "365 consecutive days"
+  },
+  {
+    "id": "streak.habit-b.1000",
+    "version": 1,
+    "kind": "streak",
+    "scope": {
+      "habit": "habit-b",
+      "requiresAll": false
+    },
+    "threshold": 1000,
+    "neutralDaysBridge": false,
+    "repeatPolicy": "once",
+    "titleKey": "rule.streak.1000",
+    "fallbackTitle": "1000 consecutive days"
+  },
+  {
+    "id": "streak.habit-c.7",
+    "version": 1,
+    "kind": "streak",
+    "scope": {
+      "habit": "habit-c",
+      "requiresAll": false
+    },
+    "threshold": 7,
+    "neutralDaysBridge": false,
+    "repeatPolicy": "once",
+    "titleKey": "rule.streak.7",
+    "fallbackTitle": "7 consecutive days"
+  },
+  {
+    "id": "streak.habit-c.30",
+    "version": 1,
+    "kind": "streak",
+    "scope": {
+      "habit": "habit-c",
+      "requiresAll": false
+    },
+    "threshold": 30,
+    "neutralDaysBridge": false,
+    "repeatPolicy": "once",
+    "titleKey": "rule.streak.30",
+    "fallbackTitle": "30 consecutive days"
+  },
+  {
+    "id": "streak.habit-c.100",
+    "version": 1,
+    "kind": "streak",
+    "scope": {
+      "habit": "habit-c",
+      "requiresAll": false
+    },
+    "threshold": 100,
+    "neutralDaysBridge": false,
+    "repeatPolicy": "once",
+    "titleKey": "rule.streak.100",
+    "fallbackTitle": "100 consecutive days"
+  },
+  {
+    "id": "streak.habit-c.365",
+    "version": 1,
+    "kind": "streak",
+    "scope": {
+      "habit": "habit-c",
+      "requiresAll": false
+    },
+    "threshold": 365,
+    "neutralDaysBridge": false,
+    "repeatPolicy": "once",
+    "titleKey": "rule.streak.365",
+    "fallbackTitle": "365 consecutive days"
+  },
+  {
+    "id": "streak.habit-c.1000",
+    "version": 1,
+    "kind": "streak",
+    "scope": {
+      "habit": "habit-c",
+      "requiresAll": false
+    },
+    "threshold": 1000,
+    "neutralDaysBridge": false,
+    "repeatPolicy": "once",
+    "titleKey": "rule.streak.1000",
+    "fallbackTitle": "1000 consecutive days"
+  },
+  {
+    "id": "streak.habit-d.7",
+    "version": 1,
+    "kind": "streak",
+    "scope": {
+      "habit": "habit-d",
+      "requiresAll": false
+    },
+    "threshold": 7,
+    "neutralDaysBridge": false,
+    "repeatPolicy": "once",
+    "titleKey": "rule.streak.7",
+    "fallbackTitle": "7 consecutive days"
+  },
+  {
+    "id": "streak.habit-d.30",
+    "version": 1,
+    "kind": "streak",
+    "scope": {
+      "habit": "habit-d",
+      "requiresAll": false
+    },
+    "threshold": 30,
+    "neutralDaysBridge": false,
+    "repeatPolicy": "once",
+    "titleKey": "rule.streak.30",
+    "fallbackTitle": "30 consecutive days"
+  },
+  {
+    "id": "streak.habit-d.100",
+    "version": 1,
+    "kind": "streak",
+    "scope": {
+      "habit": "habit-d",
+      "requiresAll": false
+    },
+    "threshold": 100,
+    "neutralDaysBridge": false,
+    "repeatPolicy": "once",
+    "titleKey": "rule.streak.100",
+    "fallbackTitle": "100 consecutive days"
+  },
+  {
+    "id": "streak.habit-d.365",
+    "version": 1,
+    "kind": "streak",
+    "scope": {
+      "habit": "habit-d",
+      "requiresAll": false
+    },
+    "threshold": 365,
+    "neutralDaysBridge": false,
+    "repeatPolicy": "once",
+    "titleKey": "rule.streak.365",
+    "fallbackTitle": "365 consecutive days"
+  },
+  {
+    "id": "streak.habit-d.1000",
+    "version": 1,
+    "kind": "streak",
+    "scope": {
+      "habit": "habit-d",
+      "requiresAll": false
+    },
+    "threshold": 1000,
+    "neutralDaysBridge": false,
+    "repeatPolicy": "once",
+    "titleKey": "rule.streak.1000",
+    "fallbackTitle": "1000 consecutive days"
+  }
+]

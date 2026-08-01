@@ -98,6 +98,76 @@ it. Until it is, the "insurance policy that turns a rewrite into a re-projection
 is code the user cannot run, and the phone-loss hazard below is unmitigated in
 practice rather than in principle.
 
+### Damage is detected and nothing says so
+
+Week 1b made the damaged-log condition **detectable**: `JournalRead.chain` walks
+every writer's chain and lists each break, `JournalRead.damagedLines` lists every
+line that would not decode, and `Reprojector` returns `.refusedDamaged`,
+`.refusedSealed` or `.refusedAlreadyUsed` rather than rewriting a log it cannot
+read. Every one of those values is discarded by `AppComposition.compose`.
+
+So `docs/technical.md` §6's policy is half implemented, and the missing half is
+the visible one:
+
+- nothing copies the file to `events.jsonl.damaged-<timestamp>` before touching
+  anything;
+- nothing surfaces the **one notice** saying how many days were recovered and
+  where the damaged copy is.
+
+The app does still launch, and no line is ever silently dropped from the file —
+which are the two properties §6 cares most about. But a user whose log breaks
+today is told nothing, and the corpus says they should be told once. Same missing
+surface as the export button below, and probably the same piece of work.
+
+Week 1b added a second value with the same shape as the unreachable export
+above: `Reprojector.reprojectIfNeeded()` returns an outcome, and the composition
+root throws it away. Not a correctness bug — every refusal leaves the log exactly
+as it was, and the journal chains forward from the last event it can read — but
+a permanently unchained log currently looks identical to a healthy one.
+
+### The first tap after a cache launch may decode the whole log
+
+A launch that renders from `snapshot.json` does not decode the log, so the
+journal starts with no resume and recovers `lamport` and its chain head under the
+advisory `flock` on its first write. `EventLog.replay()` normally primes it from
+the `.task` that follows the first frame, well before a tap — but a tap **can**
+beat the replay, and then the recovery lands on the main actor inside the
+synchronous steps `docs/technical.md` §4 requires to be microseconds. §6 measures
+a full decode at 193 ms at five years and 865 ms at ten, on a Mac.
+
+Not a correctness bug: `EventJournal.prime` never overwrites the **head** a tap
+already established, so the chain cannot fork either way. It is an unmeasured
+latency claim, and it belongs with the other measurements owed below.
+
+**Week 2 adds a second, larger instance of the same shape.** `WidgetStore.toggle`
+decodes the log **twice** on every press: once unlocked to decide which event to
+write, and once inside `EventJournal.record` under the `flock` to recover the
+clock and the head. That is deliberate — passing a resume is what makes `record`
+skip the lock, and several widget extension instances share one writer name — but
+it doubles the cost of the press on a log that §6 measures at 193 ms at five years.
+Nobody has measured it on a phone. If it bites, the fix is a locked read-and-record
+in one call, not a resume passed in from outside the lock.
+
+### The widget's *press* has never been verified on a device or simulator
+
+Verified: the extension is embedded, carries the same App Group as the app,
+registers with WidgetKit, and its timeline provider renders the four real habits
+read from the shared `events.jsonl` — the cross-process read path, end to end,
+seen in the widget gallery preview on 2026-08-01.
+
+Not verified: pressing a row. Placing a widget on the iOS 18.4 simulator segfaults
+SpringBoard inside `-[SBHRippleSimulation clear]`, which is Apple's Home Screen
+wallpaper code and has nothing to do with Compass, so the widget could not be
+placed to press. Every layer beneath `Button(intent:)` is under test —
+`WidgetStoreTests` and `TwoWritersTests` — and the plumbing above it is Apple's.
+What is genuinely unexercised is the two-line `ToggleHabitIntent.perform()` and
+the `Button(intent:)` binding.
+
+**Clear it the first time the app is on the phone**, which is the same trip that
+clears the entry below: add the widget, press a row, and confirm
+`writer-widget.id` appears in the container beside `writer-app.id` with a second
+chain in `events.jsonl`.
+
 ### The app has never been verified on a phone
 
 Every verification to date is `swift test` plus a simulator install. No entry in
@@ -106,6 +176,166 @@ Every verification to date is `swift test` plus a simulator install. No entry in
 `memory/current-focus.md`.
 
 ---
+
+### `BGTaskScheduler` registration is untested, and it throws when it is wrong
+
+`AnchorScheduler.register()` is the `BGProcessingTask` half of §9.8, and it is
+the half no test watches — deliberately, because the scheduler decides when it
+runs and a test cannot make it. Every line that can be wrong is in
+`AnchorPipeline`, which `swift test` compiles.
+
+**Registration and submission are verified on the simulator**, from the device
+log on 2026-08-01 rather than from the build settings that were meant to produce
+them:
+
+```
+[com.apple.BackgroundTasks:Framework] submitTaskRequest:
+  <BGProcessingTaskRequest: dev.farros.compass.anchor,
+   earliestBeginDate: 2026-08-01 04:36:32 +0000,
+   requiresExternalPower=0, requiresNetworkConnectivity=1>
+```
+
+So `register` did not throw and the system accepted the request. That is the
+failure that was nearly shipped: the identifier was first written as an
+`INFOPLIST_KEY_` build setting and **silently dropped** from the built product
+with no warning at any stage, and `BGTaskScheduler.register` throws when its
+identifier is missing from `BGTaskSchedulerPermittedIdentifiers`.
+
+What is still unexercised is the only part that matters and the only part nobody
+controls: **whether a task ever actually fires.** `BGProcessingTask` carries no
+execution guarantee, which is precisely why the launch drain exists and why
+`docs/technical.md` §9.8 insists on both paths. There is nothing to fix here and
+nothing to test; it is named so that nobody later mistakes "registered" for
+"runs".
+
+### The AX5 seal size has been looked at, and still not measured
+
+`Assets/seal/README.md` carries the finding "holds to 160pt, merges at 120pt"
+forward from turn 3d and then prescribes 120pt at AX5. **3d measured the
+superseded 4 x 7 twenty-eight-cell device.** The shipped device is an 8 x 8
+sixty-four-cell matrix — more than twice as dense — and at 120pt its cell falls to
+**6.14pt** with a 1pt shadow and a 1pt highlight on it, so a third of every cell
+is edge treatment. The README prescribes exactly the size already known to merge
+on a strictly sparser device.
+
+**Week 3 rendered it and looked at it, which is more than had been done and less
+than a measurement.** On the iPhone 17 Pro simulator at
+`accessibility-extra-extra-extra-large`, the cells stay individually separated —
+they do not merge into a solid block — but at actual size the field reads as
+texture rather than as data. `CertificateMetricsTests.cellPitchAtTheAccessibilitySize`
+pins 6.14pt and says in its own comment that nobody has measured it, so a change
+to either the AX5 size or the matrix ratio has to come and read that paragraph.
+
+The design's 120pt is implemented, because `PROJECT_CONSTITUTION.md` §9 says to
+implement the documented design and report. What is owed is a look on a physical
+phone at arm's length, and then a decision: keep 120, raise the floor to 168 —
+which costs nothing, because at AX5 the screen scrolls and the attestation has
+already unstacked — or drop the die at that size. It is a design change either
+way and it is the owner's call.
+
+### A habit added in the settings sheet can never earn a streak certificate
+
+`docs/technical.md` §5 says "per habit at 7, 30, 100, 365 and 1000 consecutive
+days". A rule is **static data** and `Scope.habit` is a `HabitID`, so the shipped
+rows name the four seeded identifiers — and a habit created in the sheet has an
+identifier minted at runtime that no shipped rule names. The all-habit `total`
+rows still cover it, since they are scoped to any habit; the streak rows do not.
+
+Nothing in the corpus reconciles "rules are data shipped in the bundle" with "a
+habit can be added at runtime", and week 3 did not invent a reconciliation. The
+mechanism to close it needs no new concept — `RuleStore` already reads the store's
+own `rules/` directory, so writing a per-habit row there at `habitCreated` is the
+whole fix. What it needs is a decision about whether a habit added on day 300
+should be able to earn a 7-day certificate on day 307, and that is a product
+question rather than an engineering one.
+
+### The declared-name footer is now understating rather than overstating
+
+`SettingsCopy.nameFooter` was written in week 1a, when there was no chain and no
+signature, and it deliberately claims nothing: "Optional, and nobody checks it."
+Its own doc comment says "When the seal actually exists, this is the sentence that
+earns the stronger claim."
+
+The seal exists as of week 3. The footer is still **true** — nothing verifies the
+name, and there is no second party that could — so it has not become dishonest,
+and understating is the safe direction. What it no longer says is the thing that
+is now real: a name declared before a record is sealed is inside
+`witness.logHeads` and cannot be restated afterwards without breaking that seal.
+`SettingsTests.theSheetClaimsNoCryptographyItDoesNotHave` still asserts the old,
+weaker bound, and its premise — a `FakeRecorder` whose events all carry
+`prev == genesis` — is no longer a description of the app.
+
+Left alone deliberately: it is a copy change with a real claim inside it, and a
+claim about what a seal proves should be written once, carefully, rather than
+folded into the week that first made it true.
+
+### "Three independent chances to upgrade" is two
+
+`docs/adr/0004` requires submitting every digest to all three OpenTimestamps
+calendars rather than taking the first success, and gives the reason as "three
+independent chances to upgrade". The code does exactly that. **The first real
+submission, on 2026-08-01, showed the redundancy it buys is smaller than the
+sentence implies.**
+
+The proof came back carrying two pending attestations naming
+`alice.btc.calendar.opentimestamps.org` and one naming `bob` — because
+`a.pool.opentimestamps.org` is a **pool**, and it routed the submission to alice.
+So three requests reached **two** operators.
+
+Not a bug in Compass, and nothing to change in the submission path: asking all
+three is still strictly better than asking one, and which servers a pool fronts
+is not this project's to decide. It is recorded because the number in the ADR was
+an assumption nobody had checked, and because the fix — if it is ever wanted — is
+a one-line change to `Calendars.defaults`, naming a third independent operator
+instead of a pool. Whether a third independent operator exists and is worth
+depending on is a question this project has not asked.
+
+### The app's own proof has not reached a Bitcoin block yet
+
+**The digest has.** `33a6fc1429640437cf9711e800e9a3fe46c873407eaa8f53f44c2b4e2361d106`
+— the log-head digest the app computed and submitted — is committed by **Bitcoin
+block 960500**, merkle root
+`f8c42e4dc3667ca33c0170f9f0ab935df23c5b91ee45cb2752926a3b19b2f045`. That is a
+real, upgraded OpenTimestamps proof of the real value, and the standalone
+verifier reads it and reports exactly that.
+
+What it is **not** is the proof sitting in the app's store. The confirmed one
+came from a submission made by hand thirty-three minutes earlier, while the
+canonical form was being pinned; the app's own submission went out at 10:36 and
+landed in a later aggregation round, which had not made it into a block by the
+end of the session. Same digest, different path, and only the app's path is in
+`anchors.jsonl`.
+
+So what is genuinely unexercised is one inch: `AnchorPipeline.upgradeAll`
+receiving a real Bitcoin attestation from a real `/timestamp/<commitment>` call
+and writing `confirmed` to disk. Everything on either side of it is exercised —
+the parser against genuine upgraded bytes, the pipeline against a scripted one,
+the verifier against both.
+
+**Clear it by opening the app again.** The drain runs on every foreground, the
+proof is already in `anchors.jsonl`, and the pass is idempotent. Then read
+`anchors.jsonl` and expect `confirmed` with a `blockHeight`.
+
+### The four real achievements are still inside their 72-hour window
+
+`docs/achievement-protocol.md` §7.1 forbids submitting before 72 hours after
+`detectedAt`, and the real store's four awards were detected on 2026-08-01. So
+the only thing anchored for real so far is the **log head**, and the achievement
+submission path has been exercised only against a scripted calendar. Re-open the
+app after 2026-08-04.
+
+### Export still has no surface — and week 4 made that cost more
+
+The entry above stands unchanged, and it now costs two things instead of one:
+`memory/next-tasks.md`'s scheduled iCloud Drive backup cannot be built on top of
+an export the user has never been able to run, and **the standalone verifier
+takes a bundle** — so the one artifact that makes the mission sentence true is,
+today, reachable only by someone with a Mac and this repository.
+
+The week-4 proof of the verifier was produced by running `Exporter` over the
+simulator's real container from a throwaway harness, precisely because there is
+no button. That is honest about what was demonstrated and it is not a substitute
+for the button.
 
 ## In code that will be reused
 
@@ -134,12 +364,20 @@ an external verifier, or an on-chain WebAuthn verifier, which requires signing
 the SHA-256 of a raw concatenation and would reject a double-hashed signature.
 Copying `sign()` verbatim into that path will produce signatures that fail.
 
-**Resolved.** `docs/achievement-protocol.md` **§6.7** now states the convention
-in code: Compass signs `canonicalBytes` directly with CryptoKit's `DataProtocol`
-overload, so the signed message is `SHA-256(canonicalBytes)` and equals `digest`
-with no second hash, and `Signer.sign(_ text:)` MUST NOT be called on the
-achievement path. §6 previously had no slot that could receive this answer,
-which is why this entry pointed at a section that could not hold it.
+**Resolved in the document, then in the code.**
+`docs/achievement-protocol.md` **§6.7** states the convention: Compass signs
+`canonicalBytes` directly with CryptoKit's `DataProtocol` overload, so the signed
+message is `SHA-256(canonicalBytes)` and equals `digest` with no second hash.
+
+**Week 3 copied `Signer` in and did not copy `sign(_ text:)` at all** —
+`Sources/CompassInfrastructure/Signer.swift` has `signature(over canonicalBytes:)`
+and nothing else, and the parameter is named so that a call site reading
+`signature(over: digest)` looks wrong. Two tests hold it, at two levels:
+`AchievementBytesTests.signsCanonicalBytesAndNotTheDigest` against a bare
+CryptoKit key, and `SignerTests.signsTheBytesAndNotTheDigest` against the type
+the application actually calls. Both assert the second half `.claude/skills/testing.md`
+asks for: a signature over `canonicalBytes` **fails** against `digest`.
+Reintroducing the double hash was tried on 2026-08-01 and both fail.
 
 ### `Signer` cannot restore a Secure Enclave key across launches
 
@@ -167,6 +405,22 @@ Fix while copying, before the first achievement is signed:
   `SecureEnclave.P256.Signing.PrivateKey(dataRepresentation:)`.
 - Test that two successive `Signer` constructions, and two across a simulated
   relaunch, yield the same `publicKey`.
+
+**Fixed in week 3, with all three.** `KeychainStore` writes the enclave key's
+`dataRepresentation` under `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`,
+`Signer.init(store:)` restores it, and `SignerTests` drives the **real** keychain
+under a service name of its own and deletes what it wrote — a fake behind a
+protocol would have made the assertion pass while the two `SecItem` calls that
+decide whether the key survives went unexercised. Mutation, 2026-08-01: making
+`init` ignore the stored key fails three tests, starting with
+`theKeySurvivesRelaunch`.
+
+**One clause of §8's reasoning is not yet delivered:** the accessibility class is
+"after first unlock, because the widget process must be able to construct the
+signer". The class is right, but the item has no keychain access group, so the
+widget could not read it. Nothing in v1 signs from the widget — it only records
+check-ins — so this costs nothing today. It becomes a real gap the day anything
+outside the app process has to seal something.
 
 ### `Log.persist()` rewrites the whole array
 

@@ -19,11 +19,14 @@ Read, Build, Reflect, and `Projection.habitCap` is 4. `docs/product.md` scopes
 the launch path at "two to four", so two is the floor a user can reach by
 removing rows, not what installs.
 
-A ~200-line standalone verifier is part of the plan, because "a stranger can
-check it" is not true if the stranger has to reimplement a hand-written encoder
-from a document. **It is not written yet** — `memory/next-tasks.md` schedules it
-for week 4, and until it exists the mission sentence at the top describes
-something this repository does not yet ship.
+A standalone verifier ships in this repository, because "a stranger can check
+it" is not true if the stranger has to reimplement a hand-written encoder from a
+document. `verifier/compass-verify.py` — Python 3, standard library only, **no
+code shared with the app** — recomputes the canonical bytes, the `content_hash`
+chain, the achievement digests, the P-256 signatures and the OpenTimestamps
+proofs, and re-derives each claim from the log rather than believing it. When it
+agrees with `Sources/CompassDomain/CanonicalBytes.swift`, the agreement is
+evidence rather than a tautology.
 
 It has one user. It is a daily driver and a deliberate laboratory for
 infrastructure that a habit tracker does not strictly need — event sourcing with
@@ -58,36 +61,91 @@ deferred". That contradicted the constitution, and the constitution wins.
 
 ## Status
 
-**Week 1a has shipped. The app builds, installs and runs.**
+**Weeks 1a, 1b, 2, 3 and 4 have shipped. The app builds, installs and runs, it
+has an interactive Home Screen widget, it issues and signs certificates, and it
+anchors them to Bitcoin through OpenTimestamps.**
 
-Measured on 2026-08-01: `swift test` reports **218 tests in 23 suites passed**,
+Measured on 2026-08-01: `swift test` reports **482 tests in 46 suites passed**,
 and the history is well past its first commit. A fresh install opens on Today
 with four grey habit rows — Move, Read, Build, Reflect — a `0`, an empty 28-dot
 spine, and a settings sheet behind the glyph that can add, remove, restore and
 rename.
 
-What does not exist yet: the canonical byte encoding, the hash chain, the
-widget, achievements, signing, anchoring, and the verifier. `docs/technical.md`
-§11 has the build order and `memory/current-focus.md` has the current position
-and the next step.
+Week 1b added the part that cannot be changed later: the hand-written canonical
+byte encoding, `content_hash` as SHA-256 over those bytes, per-writer `prev`
+chaining, the App Group container, `actor EventLog` and the snapshot cache. The
+existing log was replayed through the one-time `reproject` hatch and now carries
+a real chain, with the original kept as `events.jsonl.pre-chain`. The encoding
+was checked against a verifier written independently from `docs/technical.md` §3,
+in another language, against the live simulator log — which is exactly the
+property week 4's standalone verifier depends on.
+
+Week 2 added the widget, and with it the **second writer**. The app process and
+the widget process have two `device` UUIDs and two `prev` chains on one file, and
+both record through one append API — `CheckIn.toggle` — because two writers
+disagreeing about what a tap means is a fork with no lock to catch it. The
+adversarial two-process test `docs/technical.md` §9.10 asks for shipped with it,
+and earned its place immediately: it exposed an ordering defect in which a cold
+second writer's un-check was silently discarded by the fold, permanently, with the
+event sitting on disk. `memory/decisions.md` has it.
+
+Week 3 added the achievement engine and the certificate. Rules ship as JSON rows
+and the evaluators are Swift; the engine is a pure, idempotent, re-runnable
+function of the log, so a rule shipped today backfills over existing history with
+`earnedOn` set to the day the claim actually became true. Each award carries a
+frozen copy of the rule that fired and a `Witness` committing to the events that
+were counted, is signed on the spot with a Secure Enclave P-256 key, and is
+recorded as a fact rather than left as a derivation. Verified on the simulator
+against a real 32-day history: four awards backfilled, signed and verifying, each
+saying **"Sealed on this device"** and nothing about anchoring, because nothing
+has been anchored.
+
+The certificate is a document rather than a payout: full-bleed paper, no colour
+anywhere, a serif claim, and the **whole** 64-hex digest printed underneath —
+because sixteen hex characters verify nothing. The seal is a blind deboss whose
+64 struck cells are the first 64 bits of that record's Merkle root, so two
+certificates can never carry the same impression.
+
+Week 4 added anchoring and the verifier. A digest goes to **all three**
+OpenTimestamps calendars rather than the first one that answers, every pending
+proof is kept, and the event-log head is anchored weekly — without which an award
+the engine backfilled onto a day in the past would have an anchor proving only
+the day it was submitted. The certificate gains exactly one line of text when a
+proof confirms, and nothing else in the app changes.
+
+Verified against the real calendars on 2026-08-01: the app computed its log head,
+digested it, and submitted that digest to all three. **The same digest had
+already been produced hours earlier by the Python verifier reading `events.jsonl`
+alone** — two programs, no shared code, one answer. The bundle exported from that
+store passes every check the verifier can run.
+
+What does not exist yet: a proof that has actually reached a Bitcoin block — the
+first submission is hours old and a calendar aggregates on its own schedule — and
+a button that runs the export. `docs/technical.md` §11 has the build order,
+`memory/current-focus.md` has the current position, and `memory/known-bugs.md`
+has both gaps.
 
 Five design investigations completed in July 2026. What survived them is in
-`docs/`. The remaining target for week one is the walking skeleton on a real
-phone, **in daily use**, before anything cryptographic is written — and that is
-a genuine entry condition, not a slogan: week 1b does not begin until the app
-has been opened three days running.
+`docs/`. **Still owed from week 1a:** the walking skeleton on a real phone, in
+daily use. That was week 1b's stated entry condition; it was waived deliberately
+on 2026-08-01, with the cost written down at the time in `memory/decisions.md`,
+and `docs/technical.md` §11 keeps the gate as written rather than editing it to
+match the outcome.
 
 ## Where things are
 
 | Path | What it holds |
 |---|---|
-| `Sources/CompassDomain` | `Day`, `Event`, `project()`, `Projection`, the ports. Imports Foundation and nothing else |
-| `Sources/CompassApplication` | The check-in use case, between the domain and the ports |
-| `Sources/CompassInfrastructure` | `EventJournal`, `SystemClock`, `StoreLayout`, `Export`, and `AppComposition` — the composition root, which seeds the four habits |
-| `Sources/CompassUI` | `TodayView`, `HabitRow`, `SpineView`, `TodayModel`, `TodayMetrics`, and the settings sheet |
+| `Sources/CompassDomain` | `Day`, `Event`, `project()`, `Projection`, `CanonicalBytes` — both canonical forms — `EventChain`, `TodaySnapshot`, `RuleSpec`, `Achievement`, `EvidenceRoot`, `AchievementEngine`, the ports. Imports Foundation and CryptoKit |
+| `Sources/CompassApplication` | `CheckIn` — the tap-path decision **and the one append API both writers call** |
+| `Sources/CompassInfrastructure` | `EventJournal`, `EventLog`, `Reproject`, `SystemClock`, `StoreLayout`, `Export`, `WidgetStore` — the second writer's path into the store — `RuleStore`, `AwardStore`, `Signer`, `AchievementIssuer`, `Calendars`, `OpenTimestamps`, `Anchoring`, `AnchorScheduler`, and `AppComposition`, the composition root, which seeds the four habits |
+| `Sources/CompassUI` | `TodayView`, `HabitRow`, `SpineView`, `TodayModel`, `TodayMetrics`, the settings sheet, and the certificate — `CertificateView`, `SealView`, `CertificateCopy`, `CertificateMetrics` |
 | `App/` | The thin app target. Composition only; no product code |
-| `Tests/` | 218 tests in 23 suites — 85 domain, 72 UI, 53 infrastructure, 8 application |
-| `Assets/seal/` | The certificate seal assets and their specification, vendored for week 3 |
+| `Widget/` | The thin widget extension. An `AppIntent`, a timeline provider and a view; no product code |
+| `Sources/CompassLogWriter` | An executable built only so the two-process test in §9.10 has a second process. Not a product |
+| `Tests/` | 482 tests in 46 suites — 170 domain, 145 UI, 159 infrastructure, 8 application. Exactly one of them touches the network, and it is tagged `network` |
+| `verifier/` | The standalone verifier. Python 3, standard library only, no dependency on anything above it and no shared code with it |
+| `Assets/seal/` | The seal's provenance and specification. The four die frames the app actually links are copied into `Sources/CompassUI/SealFrames/`; `reference/matrix-*` are one record's render and must never be linked |
 | `docs/product.md` | Mission, the single user, the daily loop, MVP scope, and the non-goals — which are the most load-bearing part of the whole set |
 | `docs/technical.md` | Stack, data model, event flow, storage, sync, auth, testing, and every deferred item with the trigger that would make it worth building |
 | `docs/achievement-protocol.md` | The constitution for the achievement record. Exact fields, exact types, exact canonical bytes, so future code never invents a field |

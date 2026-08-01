@@ -250,3 +250,153 @@ func checkedIn(_ habit: HabitID, on iso: String, lamport: Int) -> Event {
         payload: .habit(habit)
     )
 }
+
+/// The achievement engine, faked. `TodayModel` holds it as a port and can see
+/// nothing else about it: what it awarded, and what is on record.
+///
+/// It counts passes, because the two behaviours worth pinning are both about how
+/// often the engine runs — line 5 of the tap path dispatches one, and `reconcile`
+/// runs one after the replay lands.
+final class FakeAwarding: Awarding {
+
+    struct Failure: Error {}
+
+    private struct State {
+        var book: AwardBook
+        var passes = 0
+        var fails = false
+    }
+
+    private let state: Mutex<State>
+
+    init(book: AwardBook = .empty, fails: Bool = false) {
+        state = Mutex(State(book: book, fails: fails))
+    }
+
+    var passes: Int { state.withLock { $0.passes } }
+
+    /// Replaces what the next pass will return — a milestone falling out of the
+    /// log while the app is open.
+    func issue(_ book: AwardBook) {
+        state.withLock { $0.book = book }
+    }
+
+    func evaluate() async throws -> AwardBook {
+        try state.withLock { state in
+            state.passes += 1
+            guard !state.fails else { throw Failure() }
+            return state.book
+        }
+    }
+
+    func recorded() async throws -> AwardBook {
+        try state.withLock { state in
+            guard !state.fails else { throw Failure() }
+            return AwardBook(
+                achievements: state.book.achievements,
+                revoked: state.book.revoked,
+                attestations: state.book.attestations
+            )
+        }
+    }
+}
+
+/// An achievement with everything but the fields under test defaulted.
+func award(
+    _ ruleID: String = "streak.habit-a.100",
+    kind: RuleKind = .streak,
+    habit: HabitID? = habitA,
+    threshold: Int = 100,
+    earnedOn: String = "2026-03-14",
+    detectedAt: String = "2026-03-14T12:00:00+07:00",
+    evidenceRoot: UInt8 = 0x8F
+) -> Achievement {
+    let rule = RuleSpec(
+        id: RuleID(rawValue: ruleID), kind: kind, scope: Scope(habit: habit),
+        threshold: threshold
+    )
+    var facts: [FactKey: JSONValue] = [
+        kind == .streak ? .streak : .total: .int(threshold),
+        .from: .string("2025-12-05"),
+        .sourceLive: .int(threshold),
+        .sourceBackfill: .int(0),
+    ]
+    if let habit { facts[.habitID] = .string(habit.rawValue) }
+
+    return Achievement(
+        id: AchievementID(rule: rule.id, earnedOn: day(earnedOn)),
+        rule: rule,
+        earnedOn: day(earnedOn),
+        detectedAt: instant(detectedAt),
+        facts: facts,
+        witness: Witness(
+            firstDay: day("2025-12-05"), lastDay: day(earnedOn), dayCount: threshold,
+            evidenceRoot: Data(repeating: evidenceRoot, count: 32), logHeads: [:]
+        )
+    )
+}
+
+/// The week-4 anchoring pass, faked. `TodayModel` holds it as a port and can see
+/// nothing else about it.
+///
+/// It counts drains, because the behaviour worth pinning is that the drain
+/// happens at all: `.claude/skills/ios.md` requires the queue to be drained on
+/// **two** paths, and the launch drain is the only one of the two that a test
+/// can observe — a `BGProcessingTask` fires when the system feels like it.
+final class FakeAnchoring: Anchoring {
+
+    struct Failure: Error {}
+
+    private struct State {
+        var attestations: [AchievementID: Attestation]
+        var drains = 0
+        var fails: Bool
+    }
+
+    private let state: Mutex<State>
+
+    init(attestations: [AchievementID: Attestation] = [:], fails: Bool = false) {
+        state = Mutex(State(attestations: attestations, fails: fails))
+    }
+
+    var drains: Int { state.withLock { $0.drains } }
+
+    /// What the next drain will report — a calendar answering while the app is
+    /// open.
+    func confirm(_ attestations: [AchievementID: Attestation]) {
+        state.withLock { $0.attestations = attestations }
+    }
+
+    func drain() async throws -> AnchorDrain {
+        try state.withLock { state in
+            state.drains += 1
+            guard !state.fails else { throw Failure() }
+            return AnchorDrain(
+                attestations: state.attestations,
+                confirmed: state.attestations
+                    .filter { $0.value.state == .confirmed }
+                    .keys.sorted()
+            )
+        }
+    }
+}
+
+/// An attestation with everything but the fields under test defaulted. The
+/// signature and key are placeholders: nothing on the certificate renders them,
+/// and what the certificate says about anchoring depends only on `state`.
+func attestation(
+    for id: AchievementID,
+    state: AnchorState = .sealed,
+    confirmedAt: String? = nil,
+    submittedAt: String? = nil
+) -> Attestation {
+    Attestation(
+        achievement: id,
+        publicKey: Data(repeating: 0x04, count: 65),
+        signature: Data(repeating: 0x5E, count: 64),
+        backing: .secureEnclave,
+        state: state,
+        submittedAt: submittedAt.map(instant),
+        confirmedAt: confirmedAt.map(instant)
+    )
+}

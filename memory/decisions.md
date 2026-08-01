@@ -612,3 +612,491 @@ Recorded because the Done comment previously claimed it committed *every* field,
 which was false, and because the next session to notice the asymmetry will read
 it as an oversight and "fix" it. `SettingsTests.doneRefusesToCreateFromAHalfTypedName`
 is what makes that fix fail out loud.
+
+---
+
+## 2026-08-01 — the three-day entry condition on week 1b is waived
+
+**What was waived.** `docs/technical.md` §11 gates week 1b on an entry
+condition: *the app has been opened three days running.* The owner has chosen to
+proceed with weeks 1b, 2, 3 and 4 without meeting that condition.
+
+**The condition is not partially met.** The app has never been opened on a
+phone. `memory/next-tasks.md`'s only unticked week 1a item is **"Install on the
+phone. Use it."**
+
+§11 is left standing as written. The gate and the waiver are both on the record.
+
+**What it costs, recorded so nobody has to reconstruct it later:**
+
+- **Week 1b freezes the canonical byte encoding.** §11's one-time `reproject`
+  escape hatch closes permanently at the first signature, which is week 3. So
+  the format is being frozen against a loop nobody has lived with.
+- **§11's stated reason for the gate** is that overstating the encoding as
+  irreversible "put an irreversible cryptographic commitment at item three of
+  day one for an author with 58 repositories that died on their creation day".
+- **The four high-severity defects found on 2026-07-31** were all cases of the
+  app asserting something untrue, and none was caught by a green test suite.
+  Real use is the detector that was skipped.
+
+**Who decided.** The owner, explicitly, on 2026-08-01.
+`PROJECT_CONSTITUTION.md` §6 makes the roadmap his.
+
+---
+
+## 2026-08-01 — `CompassDomain` imports CryptoKit
+
+**What changed.** `docs/technical.md` §2 and `.claude/skills/architecture.md`
+both said `CompassDomain` imports "Foundation only". They now say Foundation and
+**CryptoKit**.
+
+**Why it was not worked around.** The corpus already requires SHA-256 in the pure
+layer, twice. `content_hash` is defined in §3 as SHA-256 over canonical bytes,
+and `docs/achievement-protocol.md` §4.1 builds `evidenceRoot` out of those hashes
+inside an engine `docs/technical.md` §5 requires to be "a pure, idempotent,
+re-runnable function". A design where the pure layer cannot hash is a design
+where week 3's engine cannot be pure.
+
+**The alternatives, and why both are worse and both are already forbidden:**
+
+- **A hashing port in Domain.** One implementation, one call site.
+  `PROJECT_CONSTITUTION.md` §8: "No abstraction with a single use site."
+- **A hand-written SHA-256.** `PROJECT_CONSTITUTION.md` §5: prefer mature,
+  well-supported technology; newness is never sufficient. Re-implementing a
+  primitive that ships in the OS, on the path that a Bitcoin anchor will
+  eventually depend on, is the opposite of that rule.
+- **`content_hash` computed in Infrastructure.** Splits one concept across a
+  boundary, leaves `Event` unable to verify its own chain, and forces week 3's
+  pure engine to take an injected hasher — which is the first alternative again.
+
+**What it does not change.** The boundary that is load-bearing is *Domain must
+never learn Infrastructure exists*, and §2 says the enforcement mechanism is that
+"a target that does not declare a dependency physically cannot import it".
+CryptoKit is a platform framework, not a package target; it is not declared as a
+dependency by anything and the compiler still refuses `import CompassInfrastructure`
+inside Domain. The rule that a **third-party package** needs a fired trigger in
+`docs/technical.md` §10 is untouched — third-party dependencies in v1 are still
+none.
+
+**Authority.** `PROJECT_CONSTITUTION.md` §6 gives the AI "project structure,
+package layout, Swift APIs". This is that. It is recorded here because the
+sentence it changed was quoted in two skills files and a doc, and a quiet edit to
+a rule that three documents state is how a rule stops being a rule.
+
+## 2026-08-01 — the canonical encoding, frozen
+
+**What is frozen.** `CompassDomain/CanonicalBytes.swift` is the only place the
+canonical form exists in code. It is the eleven values `docs/technical.md` §3
+lists, in that order, UTF-8, no whitespace, `source` omitted when absent,
+`payload` present always and closed per kind, `prev` as padded base64. Escaping is
+`\\`, `\"`, `\n` and nothing else; every other control character is **refused at
+write time**, which is why `EventJournal` canonicalises before it writes.
+
+**How it was checked, and why the method matters more than the result.** The
+expected byte string in `CanonicalBytesTests` is transcribed from §3 **by hand**
+and its SHA-256 comes from two tools outside this project. A hex captured from a
+run pins whatever the code happened to do, and the first session to reorder a key
+re-records it and nothing fails. Independently, a ~40-line verifier written in
+Python from §3 alone — sharing no code with the app — reproduced every
+`content_hash` and every `prev` link in the **live simulator log**, including
+after a real tap. That is the property week 4's standalone verifier needs and it
+is now demonstrated rather than assumed.
+
+**One rule reproduces the whole per-kind payload table:** emit the present fields
+in the fixed order `habitID`, `name`, `achievementID`, `reason`. Every kind §3
+lists is a subsequence of that order. It was chosen over a `switch` on `kind`
+because `EventKind` is a `RawRepresentable` string precisely so a newer build can
+add a kind — and a `switch` would have no branch for one, so two builds would
+disagree about the bytes of one line.
+
+## 2026-08-01 — the `reproject` hatch has been used, and "exactly once" is enforced in code
+
+**It ran.** On 2026-08-01, against the real week-1a log in the App Group
+container. Four `habitCreated` events that carried `prev = genesis` now carry a
+chain; `events.jsonl.pre-chain` holds the original and is never overwritten.
+
+**"Exactly once" is not a flag.** `docs/technical.md` §11 says the hatch may be
+used exactly once. An already-chained log makes it a no-op, which covers the
+ordinary second launch — but a chain that breaks *later*, for any reason, would
+have walked straight back in and rewritten every `prev` in the file. That is a
+second use.
+
+The rule is now: `events.jsonl.pre-chain` is the record of the first use, and its
+contents decide. Absent — first use, copy and rewrite. Identical to the live log —
+a previous attempt died between the copy and the swap, so finishing it is the
+*same* use. Different — the hatch has been used; refuse with
+`.refusedAlreadyUsed`, and whatever broke the chain since is damage to report
+under §6, not a `prev` to recompute.
+
+**This was found by mutation, not by review.** Reintroducing "overwrite the
+pre-chain original" left the whole suite green, because the only test that
+exercised a second run hit the already-chained no-op first. The surviving mutant
+was the finding.
+
+## 2026-08-01 — the snapshot cache may never carry a `lamport` or a chain head
+
+**The rule.** `snapshot.json` carries habit names, today's booleans, the totals
+and the strip. It carries **no `lamport`, no chain head and no `device`**, and it
+must never acquire one.
+
+**Why it is worth a decision rather than a comment.** The cache exists because a
+full rebuild is not free — 193 ms at five years, 865 ms at ten — and the obvious
+next optimisation is to put the writer's resume in it too, so the first tap after
+a cache launch does not have to read the log. That would make a file in
+`docs/technical.md` §6's *disposable* tier load-bearing for the tier that cannot
+be rebuilt: a stale cache handing a writer a `lamport` it has already used forks
+that writer's chain, silently, on the one file the whole project rests on.
+
+**What is done instead.** `EventLog.replay()` reads the log from the `.task` that
+follows the first frame and hands the resume to `EventJournal.prime(_:)`, which
+**never overwrites** one a tap already established. If a tap beats the replay the
+journal recovers under the advisory `flock` — the cold-start path §4 already
+describes. The cost is a latency claim nobody has measured on a device;
+`memory/known-bugs.md` carries it.
+
+**A second consequence, stated because it looks like a bug.** While the cache
+stands in for the log, `TodayModel.totalDays` is computed as
+`snapshot.daysRecorded − (snapshot.dayIsRecorded ? 1 : 0) + (recorded today ? 1 : 0)`.
+That is exact, not approximate: today is the only day whose recorded-ness can
+change before the replay lands. The largest number on the screen is the one thing
+a person checks, and a cache that could only be roughly right about it would be
+worse than no cache.
+
+## 2026-08-01 — `spineLength` moved to `CompassDomain`
+
+**What moved.** The literal `28`. `TodayMetrics.spineLength` now reads
+`TodaySnapshot.spineLength`.
+
+**Why.** The launch cache carries the strip and is written by
+`CompassInfrastructure`, which cannot import `CompassUI`. The alternatives were a
+second constant in Infrastructure — two things that can disagree, and the one
+that is wrong is the one nobody is looking at — or passing the number down
+through `AppComposition.compose`, which would have put a forwarded argument in
+`App/`, where `.claude/skills/architecture.md` forbids one because no test can see
+it.
+
+**Precedent, not a new idea.** `Projection.habitCap` already lives beside the
+fold rather than beside the layout, for the same stated reason. `TodayMetrics`
+remains the only place the *layout* asks the question.
+
+---
+
+## 2026-08-01 — `lamport` is a Lamport clock, and week 1b implemented a serial number
+
+**Found by the two-writer test, on the day it was written, exactly as
+`docs/technical.md` §4 predicted a cross-process defect would have to be found.**
+
+`JournalRead.resume(for:)` recovered `highWaterMarks[writer]` — the writer's own
+highest `lamport`. §3 has always said "Lamport first so causality holds", and a
+per-writer serial number carries no causality. With one writer the two are the
+same number and nothing in a suite of 287 tests could distinguish them.
+
+What the second writer made observable:
+
+> The app seeds four habits and records a check-in, reaching `lamport 5`. The
+> widget process, which has never written, starts at **1**. The user presses the
+> widget to un-check that habit and the revocation lands at `(1, widget)`. The
+> fold resolves the cell last-writer-wins under `(lamport, device)`, so
+> `(5, app)` wins and the un-check is **discarded** — not delayed, discarded, for
+> as long as the log exists, with the event sitting on disk the whole time.
+
+**Decision: the clock resumes from the highest `lamport` in the whole log; the
+chain head stays this writer's own.** Recovered together, updated apart. This is
+implementing what the document says, not redesigning it — `PROJECT_CONSTITUTION.md`
+§9. Per-writer monotonicity and `(lamport, device)` uniqueness both survive: a
+maximum over a set containing this writer's mark cannot be below it, and the
+`device` half is what two writers landing on one number have always had.
+
+Two consequences, both implemented:
+
+- `EventJournal.prime` now **raises** a clock it already has, where it used to
+  refuse any second value. It still never moves the head — a value read before a
+  write that already happened would fork the chain. The head is the thing that
+  must not move backwards; the clock is the thing that must not stand still.
+- `TodayView` reconciles on `.task(id: scenePhase)`, so an app returning from the
+  background re-reads the log and re-primes. Without it, a tap made a second ago
+  ties with a widget press from ten minutes ago and the tie is decided by which
+  random UUID is larger.
+
+Four tests fail without this: `theClockCarriesCausality`,
+`primingRaisesTheClockButNeverMovesTheHead`, `theLaterPressWins`, and
+`thetwoWritersShareOneTruth`.
+
+---
+
+## 2026-08-01 — `CompassInfrastructure` imports `CompassApplication`
+
+`docs/technical.md` §11 requires the widget to use "the same append API" as the
+app, and §4 says why: two writers disagreeing about what a tap means is a fork
+with no lock to catch it. That decision is `CheckIn` and it lives in
+`CompassApplication`; the widget's path into the store is Infrastructure, because
+it reads the log, takes the `flock` and writes the disposable cache.
+
+So one of three things had to be true, and the third was chosen:
+
+1. duplicate the decision in the widget path — the fork itself;
+2. move `CheckIn` into `CompassDomain`, reversing a written decision and emptying
+   `CompassApplication` for no gain;
+3. **add the edge Infrastructure → Application → Domain.**
+
+No cycle, and the one load-bearing boundary — Domain must never learn
+Infrastructure exists — is untouched. `PROJECT_CONSTITUTION.md` §6 puts package
+layout squarely in the AI's authority; recorded here because §2's dependency list
+is documentation and changed with the code.
+
+The shared call is `CheckIn.toggle(_:on:in:from:using:)`. `TodayModel.toggle`
+passes `.tap`, the widget passes `.widget`, and nothing else differs. Mutation:
+give the widget its own `record` call and `sourceIsTheWidgetsOwn` fails.
+
+---
+
+## 2026-08-01 — one App Intent ships, not two
+
+`memory/next-tasks.md` listed `ToggleHabitIntent` **and** `CheckInIntent`. Only
+the first is written.
+
+`.claude/skills/ios.md` says to "build App Intents first, as substrate — but ship
+**only the widget** on top of them in v1", and `docs/technical.md` §10b defers
+`AppShortcutsProvider` phrases, the Control Center control and the Action Button
+behind triggers that have not fired. A second intent with no caller is an entry
+point with no user, and the same skill file states the cost: "every extra entry
+point is another place the tap path must stay correct and another place a wrong
+day boundary or a lost write can hide."
+
+The deferral is enforced rather than remembered: `isDiscoverable = false` keeps
+the intent out of Shortcuts and Siri. Overturn by writing the phrases when a
+Shortcuts automation is actually wanted.
+
+---
+
+## 2026-08-01 — the widget writes the disposable cache, and reads the log
+
+Two decisions about `snapshot.json` that pull in opposite directions, and both
+follow from the same rule: a cache is a claim, the log is the fact.
+
+**It writes the cache after a press.** Not doing so leaves the app's next launch
+rendering a first frame that contradicts a press the user just made and watched
+land. The cache carries no `lamport`, no head and no `device`, so a second process
+writing it cannot fork anything — which is precisely why
+`.claude/skills/architecture.md` requires it to stay that way.
+
+**It never reads the cache.** In the app a stale cache costs one wrong frame and
+the replay fixes it; here the read decides *which event gets written*, and a stale
+"unchecked" appends a second `checkedIn` for a day that already has one.
+
+Also decided here: a press for a habit that is archived or absent is **refused**,
+writing nothing. A rendered widget outlives the row it was drawn from, and the app
+cannot reach this state because its rows come from the live projection.
+
+---
+
+## 2026-08-01 — week 3: five design assertions adjudicated against the frozen docs
+
+The design bundle for the certificate and the seal is five turns deep and
+contradicts itself and `.claude/skills/ui.md` in five places. Each is settled
+here so it is not re-argued, and each is a **refusal recorded as the decision**
+rather than a silence.
+
+### 1. The attestation copy is `ui.md`'s, verbatim
+
+`ui.md` lines 48–50 fix the literal strings: **"Sealed on this device"**,
+upgrading on confirmation to **"Sealed on this device · Anchored <date>"** — one
+line, a middot, no full stops. The design bundle renders three different
+treatments across three turns: two sentences with full stops, two separate lines,
+and one continuous sentence. None of them is `ui.md`'s, and `ui.md` is frozen.
+
+`ui.md` wins. If the two-line notary stack is ever wanted, it is a copy change and
+it needs a line here first — which is what this entry is the precedent for.
+
+### 2. The seal's press-and-settle animation does not ship
+
+`ui.md` line 46 enumerates exactly one certificate animation — "fades up 12pt over
+220ms" — and adds "It does not pop, bounce, fly, or spin." The design adds a
+second: the seal scaling 1.035 → 1.0 over 180ms from t=60ms. It is inside the
+300ms budget and has no overshoot, so it is not literally a bounce; a scale-in is
+nonetheless the nearest thing on that list, and `ui.md` authorises no second
+animation.
+
+The design concedes it itself: "the certificate would lose nothing by being still,
+and stillness is more in character for a document. If the 180ms ever looks like
+flourish on the device, delete it — the layout does not depend on it." So it is
+still. Overturn by writing the line here, not by re-reading the design bundle.
+
+### 3. There is no haptic on issue
+
+Turn 6f states flatly "The haptic ships." Nothing authorises it: `ui.md`'s only
+haptic rule is about the daily tap, and the non-goals do not cover haptics either
+way — so this is not a non-goal violation, it is an unrecorded product decision
+taken inside a design bundle. `docs/product.md` is explicit that decisions are
+made in writing here and never by a field quietly appearing in a spec. It is
+dropped. 6f itself says reversing it costs one line.
+
+### 4. A rule ID names the opaque `HabitID`, never a display name
+
+`docs/achievement-protocol.md` §3.1's example is `"streak.meditate.100"`. Taken
+literally that is the failure §3.4 exists to prevent, one field over: `rule.id` is
+inside the digest (§6.2), it is printed verbatim in the certificate's identifier
+block, and the certificate is the artifact designed to be handed to a stranger. A
+record named after a recovery programme, a medical routine or a therapy task would
+be unredactable forever — which is §3.4's own argument about `facts`.
+
+**The shipped rows read `streak.habit-a.100`.** The rendering rule that follows,
+which had to be decided before the first certificate was signed:
+
+> The habit's **display name** is resolved at render time from the mutable local
+> mapping, keyed by the `habitID` in `facts`. **Nothing frozen into the record
+> ever carries a display name, including `rule.id`.**
+
+So after a rename the claim line changes and the identifier line does not — and
+they **cannot** disagree, because the identifier line names no habit at all.
+`CertificateCopyTests.aRenameCannotMakeTheDocumentContradictItself` is the
+mutation target; `AchievementIssuerTests.ruleIdentifiersAreOpaque` is the guard on
+the shipped rows.
+
+### 5. A pre-baked matrix render never ships, and the guard reads the source tree
+
+One line of turn 5c says "Shipping assets are the full-size PNGs", and every
+certificate drawing in turn 5 displays a rendered matrix as the seal. A pre-baked
+matrix prints an **identical** 64-bit hallmark on every certificate — destroying
+the exact property 5c claims for it and putting a false statement on a signed,
+anchored, shareable document. Turn 5d, later in the same turn, withdraws it. The
+later line governs and `Assets/seal/README.md` had already adjudicated it.
+
+Two consequences that are decisions rather than restatements:
+
+- **The die frames ship as four loose PNGs, not as an asset catalogue.**
+  `swift build` does not run `actool`, so a catalogue is copied verbatim into the
+  resource bundle and every lookup inside it fails.
+- **The guard reads `Sources/`, not the built bundle.** Copying a matrix render
+  into `Sources/CompassUI/SealFrames/` was tried on 2026-08-01: SwiftPM did not
+  notice, did not re-copy, and the bundle-only assertion **passed with the render
+  sitting in the repository**. A guard a stale build can defeat is not a guard.
+
+---
+
+## 2026-08-01 — the certificate list falls back to `earnedOn`
+
+`docs/achievement-protocol.md` §3.3 gives `detectedAt` exactly two jobs, one of
+which is ordering the certificate list. On the run that produces the *longest*
+list — the first pass, which backfills every historical award — every record is
+detected at the same instant, so `detectedAt` orders nothing at all.
+
+Measured on the simulator: four awards issued in one pass rendered as 7 days,
+30 days, 7 days, 30 days. Reverse-chronological in name only.
+
+So the order is `detectedAt`, then `earnedOn`, then `id`. `earnedOn` is a digested
+field and it is what a person means by chronological. The `id` stays as the last
+resort so two records earned on one day still have one order.
+
+---
+
+## 2026-08-01 — the achievement engine takes the log, not a projection
+
+`docs/technical.md` §4's tap-path sketch reads
+`Task { await achievements.evaluate(projection) }`, and that signature cannot be
+implemented: `docs/achievement-protocol.md` §4.1 builds `evidenceRoot` out of the
+qualifying events' `content_hash`, and `witness.logHeads` needs every writer's
+chain head. A `Projection` carries neither — it folds check-ins into booleans and
+drops the events that produced them.
+
+Teaching `Projection` to carry the winning `Event` per cell was considered and
+rejected: the projection is also rehydrated from the disposable launch cache,
+which has no events in it, so half of every restored projection would carry a
+field it structurally cannot fill.
+
+So the `Awarding` port takes nothing and the adapter reads the log. `QualifyingLog`
+re-derives the `(habit, day)` cell in the same last-writer-wins order `Projection`
+uses, and `AchievementEngineTests.theEngineAndTheFoldAgree` is what holds the two
+together rather than review.
+
+---
+
+## 2026-08-01 — week 4: three decisions the documents did not make
+
+All three arose because ADR 0004 mandates weekly log-head anchoring and
+`docs/achievement-protocol.md` specifies only the *achievement* record. They are
+recorded rather than left implicit, because each is a place a future session
+would otherwise re-derive an answer and pick a different one.
+
+### The log-head anchor is a new record type, in its own file
+
+`anchors.jsonl`, with its canonical form fixed in `docs/technical.md` §6.
+
+**Why not in `attestations.jsonl`.** That file is keyed by `AchievementID` and a
+log head is not an achievement. Filing one there would have meant minting a fake
+achievement identifier to key it under — the exact kind of invention
+`docs/achievement-protocol.md` exists to prevent, performed inside the file that
+document specifies.
+
+**Why the canonical form carries no timestamp.** ADR 0004's own argument against
+putting `attainedAt` on a chain is that a self-asserted instant is "just a number
+the issuer typed in". The calendar is what supplies the time; a claimed one
+inside the digest would be claiming the thing being proved. The consequence is
+deliberate and load-bearing: two anchors over the same heads have the same
+digest, so **unchanged heads are never re-anchored** — a second submission would
+buy a strictly later Bitcoin timestamp for a value that already has an earlier
+one.
+
+**What was given up.** A fourth file in the store, and a fourth entry in the
+export list that is stated identically in four documents. Both were paid in the
+same change.
+
+### The retry counter is the append-only file, not a new field
+
+`docs/achievement-protocol.md` §7.1 requires exponential backoff and §7's
+`Attestation` has no field for an attempt count. **No field was added.** Both
+anchor files are append-only and every state change appends a line, so the number
+of `failed` lines for a record *is* the attempt count, and the next attempt is
+`firstAttempt + Σ delays`. Deterministic, needs nothing the protocol lacks, and
+it uses the property the storage design already had rather than adding one.
+
+The schedule doubles from one hour, stops widening at one week, and **never gives
+up** — ADR 0004 asks for re-attempts "over a long horizon, months, not the length
+of one backoff schedule", so there is no attempt limit and there must not be one.
+
+### `Attestation.calendar` stays singular, and is filled in only on confirmation
+
+ADR 0004 requires three submissions; §7 gives one `calendar` field. The field is
+left `nil` while `submitted` — there is no single calendar to name, and the three
+pending attestations live inside `otsProof`, which is the OpenTimestamps format's
+own way of holding them — and is filled in on `confirmed` with the calendar whose
+branch delivered the Bitcoin path. That is the only moment the question has one
+answer.
+
+**The alternative was amending the protocol document to make it plural**, which
+`PROJECT_CONSTITUTION.md` §6 puts outside what may change without an ADR and the
+human's agreement, for a field that is presentational and that nothing renders.
+Reported in `docs/achievement-protocol.md` §7.0 instead. The log-head record,
+which no document freezes, has `calendars` plural.
+
+---
+
+## 2026-08-01 — the verifier is Python, and it re-derives the claim
+
+**Language.** Python 3, standard library only. The competing option was a Swift
+executable in this package, which would have had CryptoKit for free. It loses on
+the one thing the verifier is for: `docs/product.md` promises a stranger can
+check the record, and a stranger with a Linux box and no Xcode is the ordinary
+case. Week 1b already set this precedent — the event encoding was checked against
+a Python verifier written from `docs/technical.md` §3 alone — and this is that
+same instrument, finished.
+
+**Scope, and why it is 579 lines and not ~200.** The brief in `technical.md` §10a
+asks for the canonical bytes, the chain, the signature and the proof. It also
+**re-derives the claim from the log**: the qualifying days for both shipped rule
+kinds, and the Merkle evidence root over the events that were counted. That was
+not in the estimate and it is the difference between checking that a record is
+signed and checking that it is *true*. A verifier that only checked signatures
+would pass a bundle in which the log says one thing and the certificate says
+another, which is precisely the forgery the whole apparatus exists to prevent.
+
+**What it refuses to do**, printed on every run rather than left to be assumed:
+it does not fetch Bitcoin headers. A Bitcoin attestation commits a merkle root at
+a stated height; confirming that root is that block's needs a node or a header
+chain, and shipping either inside the script would be a bigger act of trust than
+the one it removes. It prints the height and the root, and says it did not take
+the last step.
+
+Accepted as an implementation decision under `PROJECT_CONSTITUTION.md` §6, which
+gives the AI implementation details and testing strategy. Nothing in the product
+vision, the protocol or the trust model moved.

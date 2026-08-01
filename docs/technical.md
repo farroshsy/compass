@@ -91,28 +91,82 @@ compiler is the boundary guard, without four `Package.swift` files.
 compass/
   Package.swift
   Sources/
-    CompassDomain/          imports: Foundation only
+    CompassDomain/          imports: Foundation, CryptoKit — see below
     CompassApplication/     imports: CompassDomain
-    CompassInfrastructure/  imports: CompassDomain
+    CompassInfrastructure/  imports: CompassApplication, CompassDomain — week 2
       Composition.swift     the composition root — the only place infrastructure
                             is constructed
+      WidgetStore.swift     the second writer's whole path into the store
     CompassUI/              imports: CompassApplication, CompassDomain
-  Tests/                    218 tests in 23 suites, counted 2026-08-01
-    CompassDomainTests/     85. Pure, no filesystem, milliseconds
+    CompassLogWriter/       an executable, built only for §9.10's two-process test
+  Tests/                    482 tests in 46 suites, counted 2026-08-01 after week 4
+    CompassDomainTests/     170. Pure, no filesystem, milliseconds
     CompassApplicationTests/    8
-    CompassInfrastructureTests/ 53. A real file on a real filesystem
-    CompassUITests/         72. `TodayModel` and `SettingsEdits` against fakes
+    CompassInfrastructureTests/ 159. A real file, a real process, a real keychain,
+                            and exactly one real network call
+    CompassUITests/         145. `TodayModel`, `SettingsEdits` and what the
+                            certificate says, all against fakes
+  verifier/                 the standalone verifier — Python 3, no dependency on
+                            anything above it, and no shared code with it
   App/                      thin shell: calls the composition root, nothing else
-  Widget/                   week 2. Does not exist yet
+  Widget/                   thin shell: an AppIntent, a provider and a view
   project.yml
 ```
 
-**The domain suite is 39% of the tests, not 80%.** The figure "~80%" stood here,
+**`CompassInfrastructure` gained `CompassApplication` in week 2, and the reason is
+the widget.** §11 requires the widget to use "the same append API" as the app, and
+§4 says why in the strongest available terms: two writers disagreeing about what a
+tap means is a fork with no lock to catch it. That decision — which kind, which
+`source`, which payload — is `CheckIn`, and it lives in `CompassApplication`. The
+widget's path into the store is Infrastructure: it reads the log, it takes the
+`flock`, it writes the disposable cache. So either Infrastructure imports
+Application, or the decision is written a second time in the widget path, which is
+the fork itself.
+
+The edge runs Infrastructure → Application → Domain. There is no cycle, and **the
+one load-bearing boundary — Domain must never learn Infrastructure exists — is
+untouched.** The alternative considered and rejected was moving `CheckIn` into
+Domain, which reverses a written decision to buy nothing.
+`memory/decisions.md`, 2026-08-01.
+
+**`CompassLogWriter` is an executable that exists for one test.** §9.10 requires
+two *processes* appending to one file and states the reason in the same breath:
+every other test in the suite uses synthesised in-process streams and would pass
+while real data corrupts. A test cannot spawn a process that does not exist, so
+the process is built. It is not a product, nothing links it, and it ships nowhere.
+
+**`CompassDomain` imports `CryptoKit`, from week 1b.** This line said "Foundation
+only" until the canonical encoding landed, and the change is recorded here rather
+than made quietly because the sentence was load-bearing. `content_hash` is
+defined in §3 as SHA-256 over canonical bytes, and
+`docs/achievement-protocol.md` §4.1 builds `evidenceRoot` out of those hashes
+inside an engine §5 requires to be "a pure, idempotent, re-runnable function" —
+so SHA-256 is required *in the pure layer*, not merely convenient there. The two
+alternatives are both worse and both forbidden elsewhere in the corpus: a hashing
+port in Domain is an abstraction with a single use site
+(`PROJECT_CONSTITUTION.md` §8), and a hand-rolled SHA-256 is novelty over mature
+technology (§5). CryptoKit is a platform framework and not a package target, so
+the boundary that is actually load-bearing — **Domain must never learn
+Infrastructure exists** — is untouched, and the compiler still enforces it.
+`memory/decisions.md`, 2026-08-01.
+
+**`verifier/` is not a target and imports nothing.** It is a Python 3 script
+using only the standard library, and that is the point rather than a
+convenience: `docs/product.md`'s mission sentence promises a record a stranger
+can check "without trusting you or the app", and a checker that links the app's
+own encoder has checked that the app agrees with itself. It rebuilds both
+canonical forms from §3 and `docs/achievement-protocol.md` §6, re-derives the
+claim from the log, and does P-256 verification by hand. When it agrees with
+`CanonicalBytes.swift`, that agreement is evidence. `Tests/CompassInfrastructureTests/VerifierTests.swift`
+runs it against a bundle the suite produces, so the two cannot drift in silence.
+
+**The domain suite is 35% of the tests, not 80%.** The figure "~80%" stood here,
 in `Package.swift`, in `.claude/skills/testing.md`, in `README.md` and in
 `memory/next-tasks.md` — written before a single test existed, then copied
 between documents and never counted. It is still the suite to write in first and
 still the one that needs no device; it is not four-fifths of the project. The
-point the number was making survives; the number did not.
+point the number was making survives; the number did not — and it is recounted
+every week rather than carried forward, which is how it drifted the first time.
 
 **Infrastructure is still constructed in exactly one place. That place is now
 inside the package.** The rule did not change; only its location did. The
@@ -397,6 +451,44 @@ one phone are two writers with two `device` UUIDs and two chains. See §4.
 sort key. Lamport first so causality holds, device as a deterministic
 lexicographic tiebreak so two devices compute identical results.
 
+#### `lamport` is a Lamport clock, not a per-writer serial number
+
+Stated separately because week 1b implemented it as the second thing while this
+document said the first, and with one writer nothing could tell them apart.
+
+**A writer resumes from the highest `lamport` in the whole log, not from the
+highest one of its own.** It is still per-writer monotonic — a maximum over a set
+that includes this writer's own mark can never be below it — and `(lamport,
+device)` is still unique, because a writer never reissues one of its own and the
+`device` half is what two writers landing on one number have always had.
+
+The week-2 widget is the first thing that could observe the difference, and what
+it observed was this:
+
+> The app seeds four habits and records a check-in, reaching `lamport 5`. The
+> widget process, which has never written, starts its sequence at **1**. The user
+> presses the widget to un-check that habit, and the revocation is written at
+> `(1, widget)`. The fold resolves the `(habit, day)` cell last-writer-wins under
+> `(lamport, device)`, so `(5, app)` beats `(1, widget)`: the check-in stays, and
+> the un-check is discarded. Not delayed — discarded, for as long as the log
+> exists, with the event sitting on disk the whole time.
+
+"Lamport first so causality holds" is the sentence above, and causality is exactly
+what a per-writer serial number does not carry. A Lamport clock advances past
+everything the writer has *seen*, which makes "the user's most recent press wins"
+a property of the fold rather than a coincidence of which process started first.
+
+Two consequences worth stating because they are easy to get wrong later:
+
+- **A long-lived process must re-read.** A `lamport` recovered at launch is stale
+  the moment the other writer appends, so the app re-primes its clock on every
+  replay — and `TodayView` replays whenever the app becomes active, not only when
+  the view first appears. Without that, a tap made a second ago ties with a widget
+  press from ten minutes ago and the tie is broken by which random UUID is larger.
+- **The chain head is not the clock.** `prev` chains per writer and is never
+  raised by another writer's event; only the clock is shared. They are recovered
+  together and updated apart.
+
 **Nothing is ever mutated or deleted.** Un-checking appends a
 `checkInRevoked`; the fold resolves the `(habit, day)` cell last-writer-wins
 under the total order.
@@ -494,8 +586,28 @@ a well-defined value.
 **The answer is a separate writer identity per process.** The app has one
 `device` UUID, the widget extension has another, each generated on that
 process's first write and stored in the App Group. Each maintains its own
-`lamport` sequence and its own `prev` chain. `logHeads` then carries two heads
-for one phone, which is exactly what the field is shaped for.
+`prev` chain. `logHeads` then carries two heads for one phone, which is exactly
+what the field is shaped for.
+
+**It does not maintain its own `lamport` sequence, and that sentence was wrong.**
+The counter is per writer in the sense that a writer never reissues one of its
+own; it is *not* independent of the other writer, because the fold resolves a cell
+last-writer-wins under `(lamport, device)` and a second writer starting at 1 loses
+every such contest. See §3 — the clock resumes from the highest `lamport` in the
+log, and the chain head from this writer's own last event. The two halves are
+recovered together and updated apart.
+
+**One writer *name* can still be two processes, and the widget is that case.**
+iOS may run several widget extension instances at once and every one of them is
+`WriterIdentity.widget`, so "no two processes share a writer identity" is a
+requirement the code has to keep rather than a fact it can assume. Two things
+keep it: the identity is minted under the advisory `flock`, so two instances
+reaching a fresh store together agree on one UUID instead of each keeping its
+own; and **the widget's journal is single-use** — one press opens a journal,
+records one event under the lock, and closes it — so no cached resume can go
+stale behind another instance's append. The app is the opposite shape on purpose:
+one long-lived process, primed once, because §4 forbids a full decode on its tap
+path.
 
 This is not a workaround, it is the design already chosen: ADR 0002 rejects a
 single global hash chain precisely because concurrent appenders fork it, and
@@ -522,6 +634,15 @@ thousand appends, then assert: every line parses, no `(lamport, device)` pair
 appears twice, and each writer's chain verifies unbroken from its first event to
 its head. A design decision about concurrency with no adversarial test behind it
 is a hope.
+
+**Done in week 2, with two real processes.** `Tests/CompassInfrastructureTests/TwoWritersTests.swift`
+launches `CompassLogWriter` twice against one store, 1,500 events each. It also
+asserts the interleaving is real — a suite that passes when one process finishes
+before the other starts is a sequential test in a concurrent costume — and it
+covers the same-writer-name case above. Four separate mutations were each caught
+by a different one of these tests: removing the `flock` from the read-then-append,
+removing it from the identity mint, splitting the line into two `write(2)` calls,
+and collapsing the two writer identity files into one.
 
 ---
 
@@ -605,9 +726,34 @@ Group/
   events.jsonl        append-only, per-device hash-chained — the only truth
   awards.jsonl        append-only: achievement and revocation records
   attestations.jsonl  append-only, last-write-wins per achievement ID
+  anchors.jsonl       append-only, last-write-wins per digest — week 4
   rules/*.json        bundle + user directory, hot-reloadable
   snapshot.json       cache. Deletable. Never the source of anything.
 ```
+
+**`anchors.jsonl` arrived in week 4 and holds the weekly log-head anchors.** ADR
+0004 requires the event-log head to be anchored weekly and specifies no record
+for it, so the record is defined here rather than invented at the keyboard. It is
+its own file for one reason: `attestations.jsonl` is keyed by `AchievementID`,
+and a log head is not an achievement — filing one there would mean minting a fake
+achievement identifier to file it under.
+
+Its canonical form is the **third** in the corpus, and the only one this
+repository fixes for itself:
+
+```
+{"v":1,"kind":"logHeads","heads":<canonical-map of deviceID -> base64>}
+```
+
+Same escaping and the same byte-wise key sorting as `docs/achievement-protocol.md`
+§6.3, and `digest = SHA-256(those bytes)`. **There is no timestamp in it**, and
+that is deliberate: ADR 0004's own argument against putting `attainedAt` on a
+chain — that a self-asserted instant is "just a number the issuer typed in" —
+applies word for word here. The calendar supplies the time; putting a claimed one
+inside the digest would be claiming the thing being proved. The consequence is
+that two anchors over the same heads have the same digest, which is why unchanged
+heads are never re-anchored: a second submission would buy a strictly *later*
+Bitcoin timestamp for a value that already has an earlier one.
 
 Attestations live in their own file **because they mutate while achievements do
 not**. Separating mutable from immutable is what lets `awards.jsonl` be strictly
@@ -623,7 +769,7 @@ files in the project.
 | Tier | Files | Why |
 |---|---|---|
 | **Irreplaceable** | `events.jsonl`, `awards.jsonl` | Events are the only truth. Awards are recorded as *facts* with a frozen rule copy, precisely so recomputation under changed rules cannot un-award something already published — so recomputing them is not the same operation as reading them. |
-| **Irreplaceable in part** | `attestations.jsonl` | `otsProof`, `signature`, `publicKey` and `chain` are **not** recomputable. Re-submitting a deleted OTS proof yields a strictly later Bitcoin timestamp, which destroys the "it is not backdated" property that ADR 0004 calls the entire argument for the pairing. The signature is unrecomputable once the enclave key is gone. `ChainRecord` is the sole record that makes ADR 0001's chain-death insurance work. Only `state` and the timestamps in this file are recomputable. |
+| **Irreplaceable in part** | `attestations.jsonl`, `anchors.jsonl` | `otsProof`, `signature`, `publicKey` and `chain` are **not** recomputable. Re-submitting a deleted OTS proof yields a strictly later Bitcoin timestamp, which destroys the "it is not backdated" property that ADR 0004 calls the entire argument for the pairing. The signature is unrecomputable once the enclave key is gone. `ChainRecord` is the sole record that makes ADR 0001's chain-death insurance work. Only `state` and the timestamps in these files are recomputable. `anchors.jsonl` is here for the same reason and only that reason: its `heads` are recomputable from the log at any time, and its **proof is not**. |
 | **Disposable** | `snapshot.json`, projections, any derived table | Delete freely. A projection bug is never data loss and a change to how anything is computed costs zero migration. |
 
 The two consequences worth keeping from the old wording still hold for the
@@ -653,6 +799,24 @@ requirement is therefore:
 That preserves the real constraint — the widget cannot read a container it has
 no access to — and removes a false dependency on the developer account from the
 first line of code.
+
+**Done in week 1b, and it was one line plus a file move exactly as written.**
+The group is `group.dev.farros.compass`, declared in `App/Compass.entitlements`
+and named once in code as `AppComposition.appGroupIdentifier`.
+`AppComposition.storeURL` prefers the container and **falls back to Documents
+when the container is unreachable** — that fallback is this section's
+requirement, not a hedge: a build signed without a profile carrying the group
+still runs, still records, and still keeps every event. It simply cannot be read
+by a widget, which does not exist yet. Measured on 2026-08-01: a simulator build
+signed "to Run Locally" has the group entitlement stripped from the signature and
+`containerURL` returns a container anyway; a device build will not, which is what
+the fallback is for.
+
+The move copies every file across — the log, the writer identity, everything —
+and then **renames** the old directory to `Compass.moved-to-group` rather than
+deleting it, because `PROJECT_CONSTITUTION.md` §5 says existing data survives
+every change. It runs once, decides on the presence of a *log* rather than of a
+directory, and never writes onto a container that already holds one.
 
 ### File Data Protection, and the iCloud backup position
 
@@ -819,6 +983,7 @@ dropped their phone in a river lost every signature and every Bitcoin proof.
 events.jsonl              the whole log, canonical JSON, one event per line
 awards.jsonl              every achievement and revocation record
 attestations.jsonl        signatures, OTS proofs, anchor state, chain records
+anchors.jsonl             the weekly log-head anchors and their proofs
 rules/*.json              the rule JSON frozen into each award
 habits.json               HabitID -> display name, so a name can be revealed
 publickey.pem             the P-256 public key(s), including rotated ones
@@ -827,9 +992,21 @@ salts.json                per-token commitment salts, if any token was minted
 manifest.json             per-file SHA-256 digests, plus the export timestamp
 ```
 
+`anchors.jsonl` was added to this list in week 4, in the same change that first
+wrote one. The four copies of this list — here, `docs/product.md`,
+`docs/adr/0002` and `memory/next-tasks.md` — are updated together, which is the
+whole reason it is stated four times in identical words.
+
 **A test asserts that a fresh install fed only the exported bundle reproduces
 every achievement bit-identically and verifies every proof.** An unexercised
 escape hatch is not an escape hatch. See §9.13.
+
+**And a second reader checks the same bundle without any of this code.**
+`verifier/compass-verify.py` takes the directory above and recomputes the
+canonical bytes, the `content_hash` chain, the achievement digests, the evidence
+roots, the P-256 signatures and the OpenTimestamps proofs — in Python, from these
+documents, sharing nothing with `Sources/`. That is what turns "a stranger can
+check it" from a sentence into an executable. §10a.
 
 ### What happens when the phone dies before CloudKit exists
 
@@ -911,14 +1088,27 @@ fake clock, all running in milliseconds:
 4. **Incremental equals full replay.** After a random event sequence,
    incrementally-applied state must equal a from-zero rebuild.
 5. **Achievements fire exactly once, ever**, under full replay, after a crash,
-   and after a reinstall from the log.
+   and after a reinstall from the log. **Written in week 3.**
+   `AchievementEngineTests` also pins what "exactly once" rests on: the engine is
+   bit-identical across runs — asserted on the *digest*, because two runs that
+   agreed about the day and disagreed about the evidence root would pass a weaker
+   test and produce two different signatures — a shuffled log gives the identical
+   record, and one test holds the engine's cell map and `project(_:)` to the same
+   answer, because they are the same last-writer-wins rule written twice.
 6. **Journal crash-safety, properly.** Write a log, truncate the file at *every*
    byte offset, and assert it still opens with all complete lines intact and the
    partial tail dropped. This is what makes the synchronous-append design honest
    rather than decorative.
 7. **Canonical encoding stability.** Assert the digest of a fixed achievement
    equals a hardcoded hex string. If this test ever needs updating, something
-   irreversible has happened.
+   irreversible has happened. **Both halves are written**: the event form in week
+   1b (`CanonicalBytesTests`) and the achievement form in week 3
+   (`AchievementBytesTests`), each with its expected byte string transcribed from
+   its own document by hand and its SHA-256 computed by two tools outside this
+   project. Week 3 also adds the verification-input half `.claude/skills/testing.md`
+   asks for: a signature over `canonicalBytes` verifies against `canonicalBytes`
+   and **fails** against `digest`, which is what catches a future session
+   reintroducing the inherited double hash.
 8. **Attestation failure leaves the achievement earned and pending, and retries
    on *both* paths.** Assert the pending queue drains when a
    `BGProcessingTask` fires, **and** that it drains opportunistically on next
@@ -937,17 +1127,35 @@ fake clock, all running in milliseconds:
     `events.jsonl`, interleave several thousand events, then assert: every line
     parses, no `(lamport, device)` pair appears twice, and each writer's chain
     verifies unbroken from first event to head. §4. Write this before the widget
-    ships, not after.
+    ships, not after. **Written in week 2, with the widget, and it found the
+    `lamport` ordering defect in §3 the day it was written.** Two more assertions
+    were added because the three above are all about the *file* and none is about
+    what the file means: the two processes really did interleave, and the later
+    press wins whichever process made it.
 11. **Damaged-log recovery.** Inject a corrupted middle line, and separately a
     `prev` mismatch, and assert the §6 policy: the damaged copy is written
     first, the longest valid prefix replays, other writers' chains are
     unaffected, the app still launches, and nothing is silently dropped.
 12. **The signing key survives relaunch.** Two `Signer` constructions across a
     simulated relaunch yield the same `publicKey`. §8. Without this the
-    inherited code mints a new key every launch.
+    inherited code mints a new key every launch. **Written in week 3, against
+    the real keychain** under a service name the test owns and deletes — a fake
+    behind a protocol would have made it pass while the two `SecItem` calls that
+    decide the outcome went unexercised.
 13. **Bundle restore round-trip.** A fresh install fed only the exported bundle
     reproduces every achievement bit-identically and verifies every OTS proof.
     §8. This is the test that makes the survival claim true rather than stated.
+14. **The standalone verifier is run, by the test suite, on a bundle the test
+    suite produced.** Added in week 4, and it is a different assertion from every
+    other one in this list: `VerifierTests` shells out to
+    `verifier/compass-verify.py` and requires it to pass every check — the chain,
+    the claim re-derived from the log, the recomputed evidence root, the P-256
+    signature, and the digest the anchor commits to. Two independent
+    implementations agreeing is the only form of evidence available for a byte
+    format, since a single implementation can only ever agree with itself. Two of
+    its four cases are **negative**: an edited event is caught, and an edited
+    event with the manifest rewritten to match is still caught — by the chain and
+    by the claim, which is where the guarantee actually lives.
 
 Deliberately not written, and say so out loud rather than feeling guilty:
 SwiftUI snapshot tests (break on every point release, catch nothing a daily user
@@ -976,8 +1184,8 @@ These are decided. They wait on sequence, not on evidence.
 |---|---|
 | **Export / import round-trip** | **Week 1.** The insurance policy that turns any future rewrite into a re-projection instead of a reset. Export is a **bundle**, per §8 — not the log alone. |
 | **Interactive Home Screen widget** | **Week 2.** Takes the loop from ~3 s to ~0.7 s and is the highest value item per line of code in the project. App Intents must exist first, as substrate. |
-| **Weekly anchoring of the event-log head** | **Week 4**, alongside `OpenTimestampsAttestor`, before `CertificateView` can claim anything about the past. The old trigger — "the first time a newly-shipped rule backfills a historical achievement" — reads as distant but is guaranteed to fire on the *first* run of the week-3 engine, which backfills 7-day and 30-day awards over history accumulated since week 1. ADR 0004 states the consequence: without prior weekly anchoring such an award's anchor "proves only June". Needs only a digest and `Calendars`, and is ~52 free submissions a year. |
-| **A standalone verifier script** | **Week 4.** ~200 lines, no dependency on the app, shipped in this repository. The mission sentence promises a stranger can check the record without trusting the app; that is not achievable if the stranger must reimplement a hand-written encoder from a document. See `docs/product.md`. |
+| **Weekly anchoring of the event-log head** | **Week 4, shipped 2026-08-01.** The old trigger — "the first time a newly-shipped rule backfills a historical achievement" — read as distant and fired on the first run of the week-3 engine, exactly as predicted: four awards landed with `earnedOn` on days already in the past. `anchors.jsonl`, `LogAnchorSchedule` and `AnchorPipeline`; ~52 free submissions a year, and unchanged heads are never re-submitted. |
+| **A standalone verifier script** | **Week 4, shipped 2026-08-01** as `verifier/compass-verify.py`. Python 3, standard library only, no dependency on the app and no shared code with it. It came out at **579 lines of code** (868 with its comments) rather than ~200, and the difference is not padding: it re-derives the claim from the log and implements P-256 by hand, neither of which the estimate had in it. See "what week 4 shipped" in §11. |
 
 ### 10b. Deferred — each waits on a trigger
 
@@ -1020,15 +1228,18 @@ begins before anything interesting is attempted.
   the shard-invariance and replay-parity tests, the truncation test, the App
   Group move, `actor EventLog`, the snapshot cache, and export as a bundle.
   Entry condition: the app has been opened three days running.
+  **Shipped 2026-08-01; see below for the entry condition it shipped without.**
 - **Week 2** — App Intents as substrate, then the interactive widget. Same
   append API, zero storage change. The second writer identity and the
   two-writer test (§4) ship **with** the widget, not after it.
+  **Shipped 2026-08-01; see below, including the ordering defect it found.**
 - **Week 3** — rule specs, the evaluation engine, `CertificateView`, sealed
   locally with the enclave key only. **Habit management is no longer part of
   this stage; it landed in week 1a.**
 - **Week 4** — `OpenTimestampsAttestor`, weekly log-head anchoring, the
   standalone verifier script. The certificate gains a line of text; nothing else
-  in the app changes.
+  in the app changes. **Shipped 2026-08-01; see below, including the thing the
+  first real submission measured about ADR 0004's own mitigation.**
 - **Later, no deadline** — Control Center control; the chain limb behind the
   same `Attestor` port; watchOS.
 
@@ -1061,8 +1272,272 @@ arrived — so it needs no ADR.
   the wiring is testable (`memory/decisions.md`, 2026-07-31).
 
 **Not shipped, and still owed from week 1a:** the install on a physical phone,
-in daily use. That is week 1b's entry condition, and it is the reason week 1b
-has not begun.
+in daily use. That is week 1b's entry condition.
+
+### What week 1b shipped, and the entry condition it did not wait for
+
+Recorded on 2026-08-01, additively and in the same spirit as the section above.
+
+Everything week 1b was given landed: the hand-written canonical byte encoder and
+`content_hash`; per-writer `prev` chaining, recovered under the advisory `flock`
+on a cold start; the closed per-kind `payload` inside the digest; unknown
+top-level keys preserved, re-emitted and never digested; the encoding-stability
+test with a hardcoded digest hex; the truncation test extended to assert the
+surviving prefix is an unbroken chain; the App Group move with a one-time file
+move that keeps the old store; `actor EventLog`; the snapshot cache; and the
+one-time `reproject` hatch that gave the existing week-1a log its first chain.
+Shard invariance and replay parity already existed and were kept.
+
+**The entry condition above was waived, not met.** The waiver is recorded in
+`memory/decisions.md`, 2026-08-01, by the owner, with what it costs written down
+at the time. The gate stays in the list above rather than being edited to match
+the outcome, because the list is evidence about what was expected.
+
+The mitigation §11 provides for exactly this is now **spent**: the `reproject`
+hatch has been used, once, on the real log, and it closes for good at the first
+signature in week 3. From that point the encoding is irreversible in the full
+sense. The install on a physical phone is still owed and is now the last unticked
+item of week 1a.
+
+**One thing week 1b did not ship, and it is named rather than assumed done:** the
+damaged-log *notice*. §6's policy — copy the file aside, replay the longest valid
+prefix, surface one notice — is now detectable, because `JournalRead.chain`
+reports every break, and `Reprojector` refuses rather than rewriting a log it
+cannot read. Nothing renders any of that. `memory/known-bugs.md` carries it.
+
+### What week 2 shipped, and the defect the second writer exposed
+
+Recorded on 2026-08-01, additively, in the same spirit as the two sections above.
+
+Everything week 2 was given landed: `ToggleHabitIntent` as substrate, the
+interactive `.systemSmall` widget whose `Button(intent:)` records a check-in, the
+second writer identity `WriterIdentity.widget`, and the two-process test §9.10
+asks for. The widget goes through `CheckIn.toggle` — the same call
+`TodayModel.toggle` makes, with `.widget` in place of `.tap` — so there is one
+append API and not two.
+
+**The two-writer test paid for itself immediately.** Writing it exposed the
+`lamport` ordering defect in §3: a cold second writer started its sequence at 1,
+and every event it wrote lost the last-writer-wins comparison to the app's
+higher-numbered events, so a widget un-check was silently discarded. It was
+invisible with one writer, it was on the critical path of the highest-value
+feature in the plan, and no test in the suite could have caught it, exactly as §4
+warned. The fix and its reasoning are in §3.
+
+**One intent shipped, not two.** `memory/next-tasks.md` listed `ToggleHabitIntent`
+and `CheckInIntent`. Only the first is written, because `.claude/skills/ios.md`
+says to "ship **only the widget** on top of them in v1" and §10b defers every
+other entry point behind triggers that have not fired. A second intent with no
+caller is an entry point with no user. Reported rather than quietly dropped.
+
+**Two things week 2 changed that were not on its list**, both forced by the second
+process and both named rather than folded in silently:
+
+- **`TodayView` reconciles whenever the app becomes active**, not only when the
+  view first appears. A plain `.task` runs once per view lifetime, which was
+  correct while nothing else could write the log. Without this a habit pressed in
+  the widget renders unchecked for as long as the app stays alive.
+- **Both targets now carry `MARKETING_VERSION` and `CURRENT_PROJECT_VERSION`**,
+  set once at the project level. An app installs on the simulator without them; an
+  app *extension* does not, and iOS refuses with "Failed to create app extension
+  placeholder" because the version keys are what it matches an extension to its
+  host with.
+
+**What is verified, and what is owed.** On the simulator: the extension is
+embedded, carries the same App Group as the app, registers with WidgetKit, and its
+timeline provider renders the four real habits read from the shared
+`events.jsonl` — the cross-process *read* path, end to end. The **press** is not
+verified on a device. Placing a widget on the iOS 18.4 simulator segfaults
+SpringBoard inside `SBHRippleSimulation`, which is Apple's Home Screen wallpaper
+code and nothing to do with Compass, so the widget could not be placed to press.
+Every layer below `Button(intent:)` is under test; the plumbing above it is not.
+`memory/known-bugs.md` carries it as owed.
+
+### What week 3 shipped, and the contradictions it had to adjudicate
+
+Recorded on 2026-08-01, additively, in the same spirit as the three sections
+above.
+
+Everything week 3 was given landed: `RuleSpec` as data with the rule rows as JSON
+resources; the `streak` and `total` evaluators and nothing else; the achievement
+engine as a pure, idempotent, re-runnable function; the `evidenceRoot` Merkle
+construction exactly as `docs/achievement-protocol.md` §4.1 freezes it; the
+achievement canonical form with its own hardcoded digest hex and the signature
+half of §9.7; `Signer` copied in from the `before` repository with both §8 fixes;
+`CertificateView`, the seal, and the certificate list; the 72-hour hold as
+arithmetic in Domain; and revocation as an appended `Revocation`, never a
+deletion. **The one-time `reproject` hatch is now closed for good**: something has
+been signed.
+
+**The engine takes the log, not a projection, and §4's sketch cannot be
+implemented as written.** Line 5 reads `achievements.evaluate(projection)`.
+`docs/achievement-protocol.md` §4.1 builds `evidenceRoot` out of the qualifying
+events' `content_hash`, and `witness.logHeads` needs every writer's chain head —
+neither of which a `Projection` carries, because it folds check-ins into booleans
+and drops the events that produced them. The `Awarding` port therefore takes
+nothing and reads the log itself. This is the same class of gap as §4's
+`Event(kind:habit:day:at:)`, which cannot produce the four envelope fields §3
+requires, and it is reported here for the same reason.
+
+**A rule ID names the opaque `HabitID`, never a habit's display name.**
+`docs/achievement-protocol.md` §3.1 gives `"streak.meditate.100"` as its example,
+and taken literally that is the failure §3.4 exists to prevent, one field over:
+`rule.id` is inside the digest, it is printed verbatim in the certificate's
+identifier block, and the certificate is the artifact designed to be handed to a
+stranger. The shipped rows read `streak.habit-a.100`. The consequence is the thing
+that had to be settled before any certificate was signed: after a rename, the
+claim line and the identifier line **cannot** disagree, because the identifier
+line names no habit at all. `memory/decisions.md`.
+
+**Three design assertions were refused because `.claude/skills/ui.md` is frozen
+and says otherwise**, and each is recorded in `memory/decisions.md` rather than
+resolved silently: the attestation copy (`ui.md` fixes the literal strings; the
+design bundle renders three different treatments, none of them `ui.md`'s), the
+seal's press-and-settle animation (`ui.md` enumerates exactly one certificate
+animation), and a `.soft` haptic on issue (nothing authorises it, and
+`docs/product.md` is explicit that decisions are made in writing and never by
+something quietly appearing in a spec).
+
+**One required state was built that no turn of the design ever drew.** `ui.md`
+lines 66–70 require that an achievement `failed` for more than 30 days says so
+once, in the certificate. Nothing can reach that state before week 4, and the slot
+exists now because adding it afterwards would mean reworking the layout.
+
+**Two things week 3 changed that were not on its list**, both named rather than
+folded in silently:
+
+- **The certificate list falls back to `earnedOn`.** §3.3 gives `detectedAt` the
+  job of ordering the list, and on the run that produces the longest list — the
+  first pass over accumulated history — every award is detected at the *same
+  instant*, so it orders nothing. Measured on the simulator: four awards issued in
+  one pass listed as 7 days, 30 days, 7 days, 30 days, which is
+  reverse-chronological in name only.
+- **The seal's die frames ship as four loose PNGs rather than as an asset
+  catalogue.** `swift build` does not run `actool`, so a catalogue is copied
+  verbatim into the resource bundle and every lookup inside it fails — which would
+  have made the guard against shipping a pre-baked matrix render pass vacuously.
+  That guard now reads the source tree, because a bundle-only version of it
+  **passed with the render sitting in the repository**.
+
+**What is owed.** The install on a physical phone, still. The AX5 seal size is
+still not validated on the shipped 64-cell device in the way
+`memory/known-bugs.md` asks — it was rendered and looked at on 2026-08-01, which
+is more than had been done before and less than a measurement. And a habit created
+in the settings sheet has no per-habit streak rule, because a rule is static data
+keyed to a `HabitID`. All three are in `memory/known-bugs.md`.
+
+### What week 4 shipped, and what the first real submission measured
+
+Recorded on 2026-08-01, additively, in the same spirit as the four sections above.
+
+Everything week 4 was given landed: `Calendars` copied in from the `before`
+repository with its first-success-wins behaviour **fixed during the copy**, so a
+digest goes to all three calendars and every answer is kept; a hand-written
+OpenTimestamps codec, because holding three responses in one artifact and asking
+a calendar for an upgrade both need the format itself; `anchors.jsonl` and the
+weekly log-head anchor; the 72-hour window enforced from Domain; the
+`BGProcessingTask` **and** the launch drain, both, per §9.8; the certificate's
+anchored line, which was already built and already tested in week 3 and needed
+only something able to reach `confirmed`; and the standalone verifier.
+
+**Verified against the real calendars, not against a stub.** On 2026-08-01 the
+app running on the simulator computed the log head
+`mdpxvIUf0vUYm7baBRhFJaW9njvnmgyTx44ooD6u9E0=`, digested it to
+`33a6fc1429640437cf9711e800e9a3fe46c873407eaa8f53f44c2b4e2361d106`, and submitted
+that digest to `a.pool`, `alice` and `bob`. All three accepted it. The bundle
+exported from that store passes every check the standalone verifier can run.
+
+**The digest was computed twice, by two programs, before either had seen the
+other's answer.** The Python verifier produced
+`33a6fc14…` from `events.jsonl` alone, written from §6's canonical form, **before
+a line of the Swift encoder existed**; the app produced the identical value
+thirty-three minutes later. That is the property the whole week is for, and it is
+the one that cannot be established by a test the app writes for itself — a single
+implementation can only ever agree with itself.
+
+**What the first real submission measured, and it weakens ADR 0004's first
+mitigation.** The proof came back with **two** pending attestations naming
+`alice` and one naming `bob` — because `a.pool.opentimestamps.org` is a pool that
+routed the submission to `alice`. So "submit to all three calendars, three
+independent chances to upgrade" delivered **two** independent operators, not
+three, and no document in this corpus said so because nobody had looked. The
+submission code is correct and unchanged: it asks all three, exactly as required.
+What is weaker than stated is the redundancy that buys.
+`memory/known-bugs.md` carries it; ADR 0004 states it where the mitigation is
+listed.
+
+**Two documented shapes had to be worked around, and both are reported rather
+than designed around**, per `PROJECT_CONSTITUTION.md` §9:
+
+- **`Attestor.attest` is declared over `AchievementClaim`**, which carries an
+  achievement ID and a digest, while §7 of the protocol requires an `Attestation`
+  to carry `publicKey`, `signature` and `backing` — values a calendar knows
+  nothing about and only the signer can produce. `OpenTimestampsAttestor`
+  therefore reads the sealed record it is anchoring and returns it with the
+  anchor added. That is the honest reading of §7.1, where `sealed` strictly
+  precedes `submitted`, and it invents no field and no port. It is the same class
+  of gap as §4's `Event(kind:habit:day:at:)` and §4's `evaluate(projection)`.
+- **`Attestation.calendar` is singular** while ADR 0004 requires three
+  submissions. It is left `nil` at submission — there is no single calendar to
+  name, and the proof itself carries all three — and is filled in on confirmation
+  with the calendar whose branch delivered the Bitcoin path, which is the one
+  moment the question has a single answer. `LogAnchor`, which no document
+  freezes, has `calendars` plural and gets it right.
+
+**Two things week 4 changed that were not on its list**, both named rather than
+folded in silently:
+
+- **The app target needs a real `Info.plist` file.** `BGTaskScheduler.register`
+  throws at launch unless its identifier is in
+  `BGTaskSchedulerPermittedIdentifiers`, and both that key and `UIBackgroundModes`
+  are arrays. Written first as `INFOPLIST_KEY_` build settings — the mechanism
+  the rest of the target uses — they were **silently dropped** from the built
+  product, with no warning: the generated-plist mechanism knows a fixed set of
+  keys and ignores the rest. Measured with `plutil -p` on the built app, not
+  assumed. The failure it would have caused is the one this corpus fears most:
+  the scheduler throwing on every launch, invisibly, because
+  `.claude/skills/ui.md` forbids anchoring failure from appearing anywhere. With
+  the real plist in place the simulator log shows `submitTaskRequest:
+  <BGProcessingTaskRequest: dev.farros.compass.anchor …>` — registration did not
+  throw and the request was accepted. Whether the system ever *runs* it is not
+  something anyone controls, which is the entire reason §9.8 insists on both
+  paths.
+- **`Exporter` now writes `proofs/*.ots` and `publickey.pem`**, which §8 has
+  always listed and nothing had ever produced. Both are *derived* from
+  `attestations.jsonl` and `anchors.jsonl` rather than copied, and both exist so
+  the bundle is readable by tools that have never heard of Compass: a `.ots` file
+  is what every OpenTimestamps client reads, and a `.pem` is what every other
+  verifier reads.
+
+**Twelve mutations were run against week 4, and each was caught by a different
+test.** In the order they matter: returning the first calendar's proof and
+dropping the other two; deleting the 72-hour window; rendering anchoring language
+on `submitted`; removing the launch drain; ignoring the backoff and retrying every
+pass; re-anchoring unchanged heads; treating a pending attestation as a Bitcoin
+one; emitting the log-head map in dictionary order instead of sorted; letting a
+failed anchor start the weekly clock; exporting a `publickey.pem` that never
+signed anything; and — in the verifier, which has its own failure modes —
+skipping the signature check, and believing the claim instead of re-deriving it.
+Two more are mutations of the *artifact* rather than the code, and they are
+ordinary test cases rather than experiments: an edited event, and an edited event
+with the manifest rewritten to match.
+
+**The digest is in Bitcoin, and the app's own proof is not — yet.** Block
+**960500** commits merkle root
+`f8c42e4dc3667ca33c0170f9f0ab935df23c5b91ee45cb2752926a3b19b2f045`, which the
+upgraded proof resolves the log-head digest to. That proof came from a submission
+made by hand thirty-three minutes before the app's, while the canonical form was
+being pinned; the app's own submission landed in a later aggregation round and had
+not reached a block by the end of the session. Same digest, different path, and
+only the app's path is in `anchors.jsonl`. One inch is therefore unexercised —
+`AnchorPipeline.upgradeAll` writing `confirmed` from a real
+`/timestamp/<commitment>` response — with everything on both sides of it
+exercised. `memory/known-bugs.md`; clear it by opening the app again.
+
+**What is owed.** The install on a physical phone, still, and the widget press
+with it. And the achievements in the real store are
+inside their 72-hour window, so the only thing anchored for real so far is the
+log head. All three are in `memory/known-bugs.md`.
 
 ### Why 1a and 1b are split, and the one escape hatch that permits it
 

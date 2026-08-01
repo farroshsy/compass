@@ -115,7 +115,7 @@ struct CompositionTests {
             // Something written, by this writer, that is not a habit.
             let identity = try WriterIdentity(layout: layout).load()
             let journal = try EventJournal(
-                layout: layout, writer: identity, clock: frozenClock(), highWaterMark: 0
+                layout: layout, writer: identity, clock: frozenClock(), resume: .fresh
             )
             try journal.record(
                 kind: .subjectNamed,
