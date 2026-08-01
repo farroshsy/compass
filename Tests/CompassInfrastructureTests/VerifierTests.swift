@@ -29,7 +29,7 @@ struct VerifierTests {
     /// A store with awards, signatures and a submitted log-head anchor, exported
     /// to a bundle.
     private func exportedBundle<T>(
-        confirming: Bool = false, _ body: (URL) throws -> T
+        confirming: Bool = false, softwareKey: Bool = false, _ body: (URL) throws -> T
     ) async throws -> T {
         try await withTemporaryStoreAsync { layout in
             let issuing = frozenClock(at: "2026-02-10T09:00:00+07:00")
@@ -52,6 +52,13 @@ struct VerifierTests {
                 account: "achievement-key"
             )
             defer { keys.delete() }
+            // A simulator's key: no enclave, so the key falls back to software
+            // and the record has to say so. Minted before the pass, because the
+            // issuer restores whatever is already in the keychain — which is
+            // what a build that has ever run without an enclave does forever.
+            if softwareKey {
+                _ = try Signer(store: keys, preferEnclave: false)
+            }
             _ = try AchievementIssuer(
                 layout: layout, recorder: journal, clock: issuing, keychain: keys
             ).issue()
@@ -289,6 +296,105 @@ struct VerifierTests {
                 )
             )
             #expect(result.output.contains("Every check that could run, passed."))
+        }
+    }
+
+    // MARK: §8 — a simulator proof must not read like a phone proof
+
+    /// **The verifier says which kind of key it saw, and says it twice.**
+    /// `docs/technical.md` §8:
+    ///
+    /// > On the simulator there is no enclave and the key falls back to
+    /// > software; the record says so, rather than letting a simulator-made
+    /// > proof look as strong as a phone-made one.
+    ///
+    /// "The record says so" is only half of it. A record nothing reads out loud
+    /// is a record a reader does not have, and the run this file exists to
+    /// produce ends in a one-line conclusion — so the distinction has to survive
+    /// a reader who reads only that line. Before 2026-08-01 the summary of a
+    /// bundle every one of whose signatures came from a software key was "Every
+    /// check that could run, passed." and nothing else.
+    ///
+    /// It is **unchecked, not failed**: a software signature is perfectly valid
+    /// and nothing about the bundle is wrong. What it cannot support is the claim
+    /// that one particular phone made it, and that is what gets said.
+    @Test("A software-backed bundle says so, per record and in the summary")
+    func aSoftwareKeyIsReportedAsSoftware() async throws {
+        try await exportedBundle(softwareKey: true) { bundle in
+            // The record itself, first: this is what travels.
+            let raw = try String(
+                contentsOf: bundle.appendingPathComponent("attestations.jsonl"), encoding: .utf8
+            )
+            #expect(raw.contains("\"backing\":\"software\""))
+
+            let result = try runVerifier(on: bundle)
+            // Not a failure. The signatures verify; the provenance is weaker.
+            #expect(result.status == 0, Comment(rawValue: result.output))
+            #expect(result.output.contains("P-256 signature verifies"))
+            #expect(result.output.contains("the key is SOFTWARE-backed"))
+            #expect(result.output.contains("attests to no particular device"))
+            // And in the conclusion, where a skimming reader stops.
+            #expect(result.output.contains("were NOT made by a Secure Enclave key"))
+            #expect(!result.output.contains("every signature here came from a Secure Enclave key"))
+        }
+    }
+
+    /// The other half, so the test above cannot pass by saying "software"
+    /// unconditionally. This machine has an enclave, so the ordinary bundle is
+    /// enclave-backed and the verifier must read it as the stronger case.
+    ///
+    /// If this ever fails on a machine with no Secure Enclave, that is the
+    /// verifier being right and the fixture being wrong: the assertion is
+    /// conditioned on what the record actually says.
+    @Test("An enclave-backed bundle is reported as the stronger case")
+    func anEnclaveKeyIsReportedAsEnclave() async throws {
+        try await exportedBundle { bundle in
+            let raw = try String(
+                contentsOf: bundle.appendingPathComponent("attestations.jsonl"), encoding: .utf8
+            )
+            try withKnownIssue(
+                "this machine has no Secure Enclave, so there is no stronger case to read",
+                isIntermittent: true
+            ) {
+                #expect(raw.contains("\"backing\":\"secureEnclave\""))
+            } when: {
+                !raw.contains("\"backing\":\"secureEnclave\"")
+            }
+            guard raw.contains("\"backing\":\"secureEnclave\"") else { return }
+
+            let result = try runVerifier(on: bundle)
+            #expect(result.output.contains("the key is Secure Enclave-backed"))
+            #expect(result.output.contains("every signature here came from a Secure Enclave key"))
+            #expect(!result.output.contains("SOFTWARE-backed"))
+        }
+    }
+
+    /// A record that does not say is reported as not saying, and never assumed to
+    /// be the stronger of the two.
+    ///
+    /// This is not hypothetical bookkeeping: `attestations.jsonl` is read
+    /// last-write-wins from an append-only file that a newer or older build may
+    /// have written, and `docs/technical.md` §6's damage policy is "never
+    /// silently drop lines and never refuse". A verifier that raised a `KeyError`
+    /// on a missing field would refuse the whole bundle over one absent word, and
+    /// one that defaulted to `secureEnclave` would invent the strongest claim the
+    /// format can make.
+    @Test("An attestation with no backing field is reported as not saying")
+    func aMissingBackingIsReportedRatherThanAssumed() async throws {
+        try await exportedBundle { bundle in
+            let url = bundle.appendingPathComponent("attestations.jsonl")
+            let stripped = try String(contentsOf: url, encoding: .utf8)
+                .replacingOccurrences(of: "\"backing\":\"secureEnclave\",", with: "")
+                .replacingOccurrences(of: "\"backing\":\"software\",", with: "")
+            try stripped.write(to: url, atomically: true, encoding: .utf8)
+
+            let result = try runVerifier(on: bundle)
+            #expect(result.output.contains("does not say what backed its key"))
+            #expect(!result.output.contains("every signature here came from a Secure Enclave key"))
+            // The manifest no longer matches, which is a real failure and the
+            // one that should be reported — but the run reaches the end and says
+            // what it saw rather than dying on a missing key.
+            #expect(result.output.contains("what this run concluded"))
         }
     }
 

@@ -78,12 +78,27 @@ Four, because four is what installs — `AppComposition.seededHabits`, and
 - The certificate uses a serif face (`.system(.largeTitle, design: .serif)`).
   It is doing the entire visual argument for "document" rather than "token".
 - Exactly one `ShareLink`, on the certificate, rendered via `ImageRenderer`.
+- **Export uses `fileExporter`, and this follows from the line above rather than
+  being a second opinion about it.** The settings sheet's export control writes
+  the bundle a stranger checks; the certificate's `ShareLink` shares an image.
+  Reaching for a second share sheet is the obvious move and it makes the line
+  above false, so it is named here: `Sources/CompassUI/ExportDocument.swift`,
+  shipped 2026-08-01. Before it, `Exporter` had no call site anywhere in the app.
 - Never show a spinner, a pending badge, or a failure state for anchoring **on
   the main screen**. Anchor state lives on the certificate itself and nowhere
   else. "Invisible on the main screen" does not mean unsayable anywhere: if an
   achievement has been `failed` for more than 30 days, say so **once**, in the
   certificate, so permanent failure is discoverable rather than structurally
   unsayable. Once — not a badge, not a nag, not on Today.
+- **The same arrangement for the achievement pass, from 2026-08-01.** Today says
+  nothing about the engine and must not — it is invisible, and a status area
+  there breaks the three-second promise. But a pass that fails is remembered in
+  `TodayModel.awardFailure` and replaces the Records footer in the settings
+  sheet until a pass succeeds, because **a milestone that silently fails to issue
+  is indistinguishable from one that was never earned**, and only one of those is
+  a bug. Both call sites read `try? await awarding.evaluate()` until then and
+  discarded every failure. Same rule as the line above, one subsystem over: not
+  on Today, not nowhere.
 - Never show a wallet, address, gas, chain name, seed phrase, or the word
   "mint". If a feature cannot be made invisible, it does not ship.
 - **The widget follows the same rules, and shares the palette rather than

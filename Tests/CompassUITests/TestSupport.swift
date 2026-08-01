@@ -281,6 +281,17 @@ final class FakeAwarding: Awarding {
         state.withLock { $0.book = book }
     }
 
+    /// Stops failing and answers with `book` from the next pass onwards — the
+    /// transient failure the engine's idempotence is supposed to absorb. It is
+    /// what makes "a later successful pass clears the failure" something a test
+    /// can drive rather than something a comment asserts.
+    func succeed(with book: AwardBook) {
+        state.withLock {
+            $0.fails = false
+            $0.book = book
+        }
+    }
+
     func evaluate() async throws -> AwardBook {
         try state.withLock { state in
             state.passes += 1

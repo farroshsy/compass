@@ -157,12 +157,23 @@ the mitigation §11 provided for exactly that, and it is now spent.
       `manifest.json`, and gains the rest as they land.
 - [x] Bundle-restore round-trip test. An unexercised escape hatch is not one.
       `ExportTests`.
-- [ ] **Give export a surface.** The two boxes above are ticked and the user
-      still cannot export: nothing in `CompassUI` calls `Exporter`. Until that
-      exists, the insurance policy is unreachable and the phone-loss hazard in
-      `memory/known-bugs.md` is unmitigated in practice. This is the smallest
-      remaining piece of week 1b and it is not in the original plan because the
-      plan assumed the code would arrive with its button.
+- [x] **Give export a surface. Shipped 2026-08-01.** The two boxes above were
+      ticked for weeks while the user still could not export: nothing in
+      `CompassUI` called `Exporter`, so the insurance policy was unreachable and
+      the phone-loss hazard in `memory/known-bugs.md` was unmitigated in
+      practice. It was not in the original plan because the plan assumed the code
+      would arrive with its button.
+
+      What shipped: an `Exporting` port in `CompassDomain/Ports.swift`,
+      `Exporter.bundle(at:)` returning the bundle in memory,
+      `CompassUI/ExportDocument.swift`, and an export section at the bottom of
+      the settings sheet using **`fileExporter`** — not `ShareLink`, which
+      `.claude/skills/ui.md` reserves for the certificate and which
+      `docs/product.md` builds the certificate's whole justification on.
+      `ExportTests` pins that the in-memory bundle is byte-for-byte the one
+      `export(to:at:)` writes and that the composition root wires the port;
+      `ExportControlTests` pins the document, the failure sentence and the
+      filename.
 
 ## Week 2 — the widget. **Shipped 2026-08-01.**
 
@@ -282,9 +293,12 @@ resolved silently.
       `confirmed`. The line and its tests already existed from week 3; week 4
       built the only thing that can reach that state.
 - [ ] Scheduled export of the full bundle to iCloud Drive, plus a first-launch
-      check that the last successful export has not aged out. **Not done**, and
-      it needs the export surface below first — a scheduled export the user
-      cannot also run by hand is a backup nobody has ever seen work.
+      check that the last successful export has not aged out. **Not done, and no
+      longer blocked** — the export surface it was waiting on shipped 2026-08-01,
+      and the reason it was waiting stands: a scheduled export the user cannot
+      also run by hand is a backup nobody has ever seen work. It has a bundle
+      builder that needs no surface and no user, `Exporter.bundle(at:)`, which is
+      what a `BGProcessingTask` requires.
 - [x] **The standalone verifier** — `verifier/compass-verify.py`. Python 3,
       standard library only, no dependency on the app. 579 lines of code rather
       than the estimated ~200: re-deriving the claim from the log and

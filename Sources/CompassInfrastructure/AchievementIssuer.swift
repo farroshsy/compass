@@ -212,8 +212,24 @@ extension AchievementIssuer: Awarding {
     /// The engine is a synchronous, pure function wrapped in file I/O, and the
     /// port is `async` so that nothing on the tap path can accidentally wait for
     /// it. `docs/technical.md` §4 line 5 dispatches it into a detached `Task`.
+    ///
+    /// **A failure is written to stderr before it is rethrown.** The caller —
+    /// `TodayModel` — surfaces it in the settings sheet, which is the half a
+    /// person sees; this is the half a *future session* sees, on a device console
+    /// or in a test run, and it is written here because this is where the error
+    /// still has its context. Both halves are new on 2026-08-01: until then both
+    /// call sites did `try? await awarding.evaluate()` and a milestone that
+    /// failed to issue was indistinguishable from one that was never earned.
+    ///
+    /// It rethrows rather than swallowing. Deciding what a failure means is the
+    /// caller's job, and there is exactly one caller.
     public func evaluate() async throws -> AwardBook {
-        try issue()
+        do {
+            return try issue()
+        } catch {
+            AchievementIssuer.warn("the achievement pass failed: \(error)")
+            throw error
+        }
     }
 
     public func recorded() async throws -> AwardBook {

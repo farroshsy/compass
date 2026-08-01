@@ -222,11 +222,31 @@ response. **Open the app again and it clears.** The four real achievements are
 still inside their 72-hour window, so only the log head is anchored at all.
 
 No damaged-log *notice* — the damage is detected and reported in
-`JournalRead.chain`, and nothing renders it. **No export surface**, which now
-costs more than it did: the verifier takes a bundle, so the artifact that makes
-the mission sentence true is reachable only from a Mac with this repository. No
-scheduled iCloud Drive backup, which needs the button first. All of it is in
-`memory/next-tasks.md` and `memory/known-bugs.md`.
+`JournalRead.chain`, and nothing renders it. No scheduled iCloud Drive backup,
+which needed the export button first. All of it is in `memory/next-tasks.md` and
+`memory/known-bugs.md`.
+
+**The export surface landed on 2026-08-01**, and a verification pass found three
+other things in the same change. All four are written up in
+`memory/known-bugs.md`:
+
+- `verifier/compass-verify.py` built the Merkle evidence root over the leaves in
+  **day** order, while `docs/achievement-protocol.md` §4.1 freezes them in
+  `(lamport, device)` order. It agreed with the app on every bundle the suite had,
+  because every one of them was appended in day order by one writer; on a log two
+  writers interleave it computes a different root. The spec was the arbiter and
+  the Swift side was already right.
+- **Export had no surface at all.** `Exporter` shipped in week 1, was tested from
+  week 1, and had no call site outside its own test file — so the artifact the
+  whole survival story rests on could only be produced by a helper process. It is
+  now the last section of the settings sheet, through `fileExporter`.
+- **`Attestation.backing` was carried, exported and printed, and required
+  nowhere.** Hardcoding `.secureEnclave` in `AchievementIssuer.seal` left all 493
+  tests passing, and the verifier's conclusion read identically for a
+  software-signed bundle and an enclave-signed one.
+- **The achievement pass discarded every failure**, on both call sites, so a
+  milestone that failed to issue was indistinguishable from one that was never
+  earned. It is now recorded and shown in the settings sheet — never on Today.
 
 ## What the next session should do
 
@@ -268,9 +288,11 @@ use is still the detector that has not run.
    after 2026-08-04, when the four real achievements leave their 72-hour window
    and become the first records anchored for their own sake rather than through
    the log head.
-6. **Then the export button.** It is the smallest remaining piece of week 1b, it
-   is what the scheduled iCloud Drive backup has to be built on, and it is what
-   makes the verifier reachable by the person the record is about.
+6. ~~**Then the export button.**~~ **Done 2026-08-01.** It was the smallest
+   remaining piece of week 1b and it is what makes the verifier reachable by the
+   person the record is about. The scheduled iCloud Drive backup is now
+   unblocked: it has a bundle builder — `Exporter.bundle(at:)` — that needs no
+   surface and no user, which is exactly what a `BGProcessingTask` requires.
 
 ## Outstanding, and not blocking week 1b
 

@@ -87,7 +87,13 @@ public struct SettingsView: View {
                 habitsSection
                 addSection
                 if !model.removedHabits.isEmpty { removedSection }
-                if !model.certificates.isEmpty { certificatesSection }
+                // **Also when there are no records but the pass failed.** That
+                // is the case the failure matters most in: a first milestone
+                // that could not be issued leaves an empty list, which is
+                // exactly what "never earned" looks like.
+                if !model.certificates.isEmpty || model.awardFailure != nil {
+                    certificatesSection
+                }
                 nameSection
                 exportSection
             }
@@ -291,7 +297,17 @@ public struct SettingsView: View {
         } header: {
             Text("Records")
         } footer: {
-            Text(SettingsCopy.certificatesFooter)
+            // **Where the achievement pass gets to fail out loud.**
+            // `.claude/skills/ui.md` keeps Today silent about the engine, and it
+            // stays silent; this is the same arrangement anchoring already has,
+            // where the failure is invisible on the main screen and sayable on
+            // the certificate. A milestone that failed to issue and said nothing
+            // anywhere is indistinguishable from one that was never earned.
+            if let failure = model.awardFailure {
+                Text(SettingsCopy.awardFailed(reason: failure))
+            } else {
+                Text(SettingsCopy.certificatesFooter)
+            }
         }
     }
 

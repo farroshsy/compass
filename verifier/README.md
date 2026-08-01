@@ -43,7 +43,7 @@ silence.
 | `manifest.json` | every file's SHA-256 |
 | `events.jsonl` | canonical bytes, `content_hash`, and each writer's `prev` chain from genesis to its head |
 | `awards.jsonl` | the achievement canonical form and its digest; **that the log still supports the claim** — the qualifying days are re-derived and the Merkle evidence root recomputed from the events that were counted, with the leaves in `(lamport, device)` order per §4.1; and that each `witness.logHeads` entry is a point that exists on that writer's chain |
-| `attestations.jsonl` | the P-256 signature over the canonical bytes, verified against the public key in the bundle |
+| `attestations.jsonl` | the P-256 signature over the canonical bytes, verified against the public key in the bundle; and **what backed the key**, Secure Enclave or software, printed per record and again for the bundle as a whole |
 | `anchors.jsonl`, `proofs/*.ots` | that the anchored digest is the digest of those heads, and that the heads are this log's; then every OpenTimestamps operation replayed from the digest, reporting each attestation it reaches as a pending calendar promise or a Bitcoin block commitment |
 
 Re-deriving the claim is the part that separates *this record is signed* from
@@ -72,6 +72,13 @@ tell the two apart.
 - **Who the record is about.** The declared name in Compass is self-declared and
   unverified by construction — `memory/decisions.md`, 2026-07-31 — and nothing
   in the app ever claimed otherwise.
+- **Which hardware held the signing key.** `backing` is the issuer's own claim
+  about its own key and no signature can prove it, so this file reports what the
+  record says and never treats it as verified. A record that omits it is reported
+  as not saying rather than assumed to be enclave-backed — the strongest reading
+  is the one an attacker would pick. A software-backed bundle is *not* a failed
+  bundle: the signature is perfectly valid, and what it cannot support is the
+  claim that one particular device made it. `docs/technical.md` §8.
 - **RIPEMD-160 and Keccak-256 operations** inside a proof, if one ever appears.
   Calendars aggregate with SHA-256 and no Compass proof has contained one. A
   branch behind an operation it cannot compute is reported as unchecked, never

@@ -26,7 +26,13 @@ What it checks, and it prints every one of these as a line you can read:
                       days are re-derived and the Merkle evidence root is
                       recomputed from the events that were counted.
   4.  attestations  — the P-256 signature over the canonical bytes, verified
-                      here in pure Python against the public key in the bundle.
+                      here in pure Python against the public key in the bundle,
+                      and **what backed the key that made it**: Secure Enclave
+                      or software. Reported per record and again for the bundle
+                      as a whole, because `docs/technical.md` §8 requires that a
+                      simulator-made proof never look as strong as a phone-made
+                      one, and a reader who reads only the summary is still a
+                      reader.
   5.  anchors.jsonl — the OpenTimestamps proof: every operation is replayed
                       from the digest, and each attestation it reaches is
                       reported as a pending calendar promise or as a Bitcoin
@@ -216,6 +222,16 @@ def log_heads_bytes(heads):
 
 def sha256(data):
     return hashlib.sha256(data).digest()
+
+
+# `docs/technical.md` §8, and `Signer.swift`'s own promise: "On the simulator
+# there is no enclave and the key falls back to software; `backing` records that
+# honestly." Spelled once so the per-record line and the summary cannot drift
+# into saying two different things about the same fact.
+SOFTWARE_KEY_NOTE = (
+    "  the key is SOFTWARE-backed, per the record — a software key signs just as "
+    "validly, and attests to no particular device"
+)
 
 
 def evidence_root(content_hashes):
@@ -701,14 +717,32 @@ def verify(bundle):
             canonical,
         )
         if signed:
-            report.ok(
-                "  P-256 signature verifies, %s key"
-                % ("Secure Enclave" if attestation["backing"] == "secureEnclave" else "software")
-            )
-            if attestation["backing"] != "secureEnclave":
-                report.note("  a software key is weaker than an enclave key, and says so")
+            report.ok("  P-256 signature verifies")
         else:
             report.bad("  the P-256 signature does NOT verify")
+
+        # **What kind of key it was, printed whether or not the signature
+        # verified.** `docs/technical.md` §8: on the simulator there is no
+        # enclave and the key falls back to software, and the record says so
+        # "rather than letting a simulator-made proof look as strong as a
+        # phone-made one". That sentence is about what a reader concludes, so
+        # this line cannot sit inside the `if` above — a bundle whose signature
+        # fails is exactly a bundle whose provenance a reader wants to know.
+        #
+        # A record that does not say is reported as not saying. It is never
+        # assumed to be the stronger of the two, and it is not a crash: an older
+        # or newer build's line is the ordinary case this whole file is written
+        # to survive.
+        backing = attestation.get("backing")
+        if backing == "secureEnclave":
+            report.ok("  the key is Secure Enclave-backed, per the record")
+        elif backing == "software":
+            report.note(SOFTWARE_KEY_NOTE)
+        else:
+            report.cannot(
+                "  %s does not say what backed its key: it may be software, and a "
+                "software key is not a device attestation" % name
+            )
         report.note("  anchor state: %s" % attestation["state"])
 
     for revocation in revocations:
@@ -734,6 +768,33 @@ def verify(bundle):
             "Each signature verifies under its own key; that they belong to one "
             "person is asserted, not proven" % len(keys)
         )
+
+    # **What backed those keys, said once, at the level of the whole bundle.**
+    #
+    # `docs/technical.md` §8 requires that a simulator-made proof never look as
+    # strong as a phone-made one, and that is a statement about what a reader
+    # concludes — so it has to survive a reader who skims the per-record lines
+    # and reads only the summary. Without this, a bundle every one of whose
+    # signatures came from a software key ended a clean run with "Every check
+    # that could run, passed." and nothing else, which is exactly the mistake §8
+    # names.
+    #
+    # A software key is reported as **unchecked rather than failed**: it is not a
+    # forgery and the signature is perfectly valid. What it cannot support is the
+    # claim that a particular device made it, and that distinction is the whole
+    # content of the sentence.
+    backings = [a.get("backing") for a in attestations.values()]
+    if backings:
+        weak = [b for b in backings if b != "secureEnclave"]
+        if not weak:
+            report.ok("every signature here came from a Secure Enclave key")
+        else:
+            report.cannot(
+                "%d of %d signature(s) here were NOT made by a Secure Enclave key — a "
+                "software key signs just as validly and attests to no particular "
+                "device, so this bundle is not evidence that one phone made it"
+                % (len(weak), len(backings))
+            )
 
     # publickey.pem is what other tools read. If it disagrees with the keys that
     # actually signed, one of the two is lying about the bundle.
