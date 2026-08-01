@@ -43,7 +43,7 @@ silence.
 | `manifest.json` | every file's SHA-256 |
 | `events.jsonl` | canonical bytes, `content_hash`, and each writer's `prev` chain from genesis to its head |
 | `awards.jsonl` | the achievement canonical form and its digest; **that the log still supports the claim** — the qualifying days are re-derived and the Merkle evidence root recomputed from the events that were counted, with the leaves in `(lamport, device)` order per §4.1; and that each `witness.logHeads` entry is a point that exists on that writer's chain |
-| `attestations.jsonl` | the P-256 signature over the canonical bytes, verified against the public key in the bundle; and **what backed the key**, Secure Enclave or software, printed per record and again for the bundle as a whole |
+| `attestations.jsonl` | the P-256 signature over the canonical bytes, verified against the public key in the bundle; and **what the record claims backed the key**, Secure Enclave or software, printed per record and again for the bundle as a whole — as a claim, never as a check that passed |
 | `anchors.jsonl`, `proofs/*.ots` | that the anchored digest is the digest of those heads, and that the heads are this log's; then every OpenTimestamps operation replayed from the digest, reporting each attestation it reaches as a pending calendar promise or a Bitcoin block commitment |
 
 Re-deriving the claim is the part that separates *this record is signed* from
@@ -79,6 +79,22 @@ tell the two apart.
   is the one an attacker would pick. A software-backed bundle is *not* a failed
   bundle: the signature is perfectly valid, and what it cannot support is the
   claim that one particular device made it. `docs/technical.md` §8.
+
+  **That sentence was true of two of the three readings until 2026-08-01.**
+  `secureEnclave` printed with the same `ok` marker as the P-256 signature and
+  the manifest digests, so the one claim a forger would write was the one this
+  file asserted. `backing` is outside the digest — `docs/achievement-protocol.md`
+  §6.1 — so flipping the word on a received bundle and recomputing the manifest
+  leaves every real check passing. `ok` is now reserved for a check that
+  recomputed something, and all three readings print as readings.
+  `VerifierTests.aForgedEnclaveClaimIsNotReportedAsVerified` is the forged
+  bundle.
+
+- **Whether a bundle was made on a phone or in a simulator.** Nothing in the
+  format says, and `backing` does not: the iOS Simulator on a T2 or Apple Silicon
+  Mac mints a real Secure Enclave key in the host's enclave and honestly records
+  `secureEnclave`. `docs/achievement-protocol.md` §7.0 bis, and
+  `memory/known-bugs.md`.
 - **RIPEMD-160 and Keccak-256 operations** inside a proof, if one ever appears.
   Calendars aggregate with SHA-256 and no Compass proof has contained one. A
   branch behind an operation it cannot compute is reported as unchecked, never

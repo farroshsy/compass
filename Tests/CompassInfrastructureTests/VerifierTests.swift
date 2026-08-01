@@ -52,10 +52,16 @@ struct VerifierTests {
                 account: "achievement-key"
             )
             defer { keys.delete() }
-            // A simulator's key: no enclave, so the key falls back to software
-            // and the record has to say so. Minted before the pass, because the
-            // issuer restores whatever is already in the keychain — which is
-            // what a build that has ever run without an enclave does forever.
+            // A software key, forced. It is **not** "a simulator's key": on any
+            // host with a Secure Enclave — every T2 and Apple Silicon Mac — the
+            // simulator mints a real enclave key and the record says
+            // `secureEnclave`, measured on 2026-08-01. The fallback happens only
+            // on a host with no enclave at all. Forcing it is what lets this
+            // fixture say the same thing on every machine.
+            //
+            // Minted before the pass, because the issuer restores whatever is
+            // already in the keychain — which is what a build that has ever run
+            // without an enclave does forever.
             if softwareKey {
                 _ = try Signer(store: keys, preferEnclave: false)
             }
@@ -299,14 +305,9 @@ struct VerifierTests {
         }
     }
 
-    // MARK: §8 — a simulator proof must not read like a phone proof
+    // MARK: §8 — what the record says backed the key, read out loud
 
-    /// **The verifier says which kind of key it saw, and says it twice.**
-    /// `docs/technical.md` §8:
-    ///
-    /// > On the simulator there is no enclave and the key falls back to
-    /// > software; the record says so, rather than letting a simulator-made
-    /// > proof look as strong as a phone-made one.
+    /// **The verifier says what the record claims, and says it twice.**
     ///
     /// "The record says so" is only half of it. A record nothing reads out loud
     /// is a record a reader does not have, and the run this file exists to
@@ -335,37 +336,124 @@ struct VerifierTests {
             #expect(result.output.contains("attests to no particular device"))
             // And in the conclusion, where a skimming reader stops.
             #expect(result.output.contains("were NOT made by a Secure Enclave key"))
-            #expect(!result.output.contains("every signature here came from a Secure Enclave key"))
+            #expect(!result.output.contains("CLAIMS a Secure Enclave key"))
         }
     }
 
     /// The other half, so the test above cannot pass by saying "software"
-    /// unconditionally. This machine has an enclave, so the ordinary bundle is
-    /// enclave-backed and the verifier must read it as the stronger case.
+    /// unconditionally: a bundle whose record *does* say `secureEnclave` is read
+    /// differently, and read as a **claim** rather than as a stronger case.
     ///
-    /// If this ever fails on a machine with no Secure Enclave, that is the
-    /// verifier being right and the fixture being wrong: the assertion is
-    /// conditioned on what the record actually says.
-    @Test("An enclave-backed bundle is reported as the stronger case")
-    func anEnclaveKeyIsReportedAsEnclave() async throws {
-        try await exportedBundle { bundle in
-            let raw = try String(
-                contentsOf: bundle.appendingPathComponent("attestations.jsonl"), encoding: .utf8
-            )
-            try withKnownIssue(
-                "this machine has no Secure Enclave, so there is no stronger case to read",
-                isIntermittent: true
-            ) {
-                #expect(raw.contains("\"backing\":\"secureEnclave\""))
-            } when: {
-                !raw.contains("\"backing\":\"secureEnclave\"")
-            }
-            guard raw.contains("\"backing\":\"secureEnclave\"") else { return }
+    /// It forges nothing — `aForgedEnclaveClaimIsNotReportedAsVerified` covers
+    /// the adversarial half — and asserts only that the two words produce two
+    /// different readings, neither of them an `ok`.
+    ///
+    /// **The record is written here rather than taken from the host.** This test
+    /// used to export an ordinary bundle and hope the machine had an enclave,
+    /// with a `withKnownIssue` for machines that do not. That got the world
+    /// backwards: `SecureEnclave.isAvailable` is true inside the iOS Simulator on
+    /// every T2 and Apple Silicon Mac, and the case the escape hatch was written
+    /// for is the rare one. Writing the field makes the test say the same thing
+    /// on every host, which is what a fixture about *reporting* should do.
+    @Test("A record claiming an enclave key is read as a claim, not as a stronger case")
+    func anEnclaveClaimIsReadAsAClaim() async throws {
+        try await exportedBundle(softwareKey: true) { bundle in
+            let url = bundle.appendingPathComponent("attestations.jsonl")
+            try String(contentsOf: url, encoding: .utf8)
+                .replacingOccurrences(
+                    of: "\"backing\":\"software\"", with: "\"backing\":\"secureEnclave\""
+                )
+                .write(to: url, atomically: true, encoding: .utf8)
 
             let result = try runVerifier(on: bundle)
-            #expect(result.output.contains("the key is Secure Enclave-backed"))
-            #expect(result.output.contains("every signature here came from a Secure Enclave key"))
+            #expect(result.output.contains("CLAIMS a Secure Enclave key"))
+            #expect(result.output.contains("this run verified none of those claims"))
             #expect(!result.output.contains("SOFTWARE-backed"))
+            #expect(!result.output.contains("were NOT made by a Secure Enclave key"))
+        }
+    }
+
+    /// **The forgery the `ok` marker invited.** `docs/achievement-protocol.md`
+    /// §9 Invariant 8, and the reason it exists.
+    ///
+    /// `backing` is deliberately **outside the digest** — §7, because no
+    /// signature can prove what hardware held the key that made it — so on a
+    /// bundle received from someone else it is attacker-controlled text. This
+    /// test takes a genuinely software-signed bundle, changes the one word, and
+    /// recomputes every manifest digest exactly as an honest exporter would. The
+    /// signature still verifies, the chain is untouched, the log still supports
+    /// the claim: **nothing is left to catch it but how the field is reported.**
+    ///
+    /// Until 2026-08-01 the answer was "nothing". That bundle printed
+    ///
+    /// ```text
+    ///   ok         the key is Secure Enclave-backed, per the record
+    ///   ok       every signature here came from a Secure Enclave key
+    /// ```
+    ///
+    /// under the same `ok` marker as the P-256 signature, the manifest digests
+    /// and the chain — the three things this file actually recomputes. The
+    /// `software` and `missing` branches hedged correctly the whole time; only
+    /// the strongest claim, the one a forger would choose, was rendered as a
+    /// check that passed.
+    ///
+    /// It is **not** promoted to a failure. A bundle that claims an enclave key
+    /// is not thereby a forgery, and this file cannot tell the two apart — which
+    /// is the entire point. It is reported as unchecked, in the end-of-run list
+    /// of things this run could not do.
+    @Test("A forged secureEnclave claim is never reported as a check that passed")
+    func aForgedEnclaveClaimIsNotReportedAsVerified() async throws {
+        try await exportedBundle(softwareKey: true) { bundle in
+            let url = bundle.appendingPathComponent("attestations.jsonl")
+            let genuine = try String(contentsOf: url, encoding: .utf8)
+            #expect(genuine.contains("\"backing\":\"software\""))
+            try genuine.replacingOccurrences(
+                of: "\"backing\":\"software\"", with: "\"backing\":\"secureEnclave\""
+            ).write(to: url, atomically: true, encoding: .utf8)
+
+            // Every digest recomputed, not just the edited file's: a forger has
+            // the whole manifest and no reason to leave one stale.
+            let manifestURL = bundle.appendingPathComponent("manifest.json")
+            let manifest = try JSONDecoder().decode(
+                ExportManifest.self, from: try Data(contentsOf: manifestURL)
+            )
+            var files = manifest.files
+            for name in files.keys {
+                files[name] = Exporter.sha256Hex(
+                    try Data(contentsOf: bundle.appendingPathComponent(name))
+                )
+            }
+            try Exporter.canonicalJSON(
+                ExportManifest(exportedAt: manifest.exportedAt, files: files)
+            ).write(to: manifestURL)
+
+            let result = try runVerifier(on: bundle)
+
+            // The forgery is invisible to everything that actually verifies, and
+            // that is what makes the reporting load-bearing rather than cosmetic.
+            #expect(result.status == 0, Comment(rawValue: result.output))
+            #expect(result.output.contains("P-256 signature verifies"))
+            #expect(!result.output.contains("digest does not match the manifest"))
+            #expect(!result.output.contains("CHECK(S) FAILED"))
+
+            // **The assertion this test exists for.** `ok` is reserved for a
+            // check that recomputed something, and reading a field is not that.
+            for line in result.output.split(separator: "\n") where line.contains("Secure Enclave") {
+                #expect(
+                    !line.contains("ok "),
+                    Comment(rawValue: "an undigested claim rendered as a passed check: \(line)")
+                )
+            }
+            #expect(!result.output.contains("the key is Secure Enclave-backed"))
+            #expect(!result.output.contains("every signature here came from a Secure Enclave key"))
+
+            // And it is said out loud, twice, in the words that mark it unverified.
+            #expect(result.output.contains("CLAIMS a Secure Enclave key"))
+            #expect(result.output.contains("`backing` is outside the digest"))
+            #expect(result.output.contains("this run verified none of those claims"))
+            // In the end-of-run list, which is where a reader looks for what was
+            // not established.
+            #expect(result.output.contains("could not be checked here"))
         }
     }
 
@@ -390,7 +478,7 @@ struct VerifierTests {
 
             let result = try runVerifier(on: bundle)
             #expect(result.output.contains("does not say what backed its key"))
-            #expect(!result.output.contains("every signature here came from a Secure Enclave key"))
+            #expect(!result.output.contains("CLAIMS a Secure Enclave key"))
             // The manifest no longer matches, which is a real failure and the
             // one that should be reported — but the run reaches the end and says
             // what it saw rather than dying on a missing key.

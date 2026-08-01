@@ -67,9 +67,11 @@ on screen *and the screen is the record of what happened*.
 Fixed 2026-08-01. The shape: **a value that is carried everywhere and required
 nowhere.**
 
-`Signer.swift`'s own doc comment promises that "on the simulator there is no
-enclave and the key falls back to software; `backing` records that honestly", and
-every mechanism that promise needs was in place — `Attestation.backing` was
+`Signer.swift`'s own doc comment promised that "on the simulator there is no
+enclave and the key falls back to software; `backing` records that honestly" —
+the first half of which was measured false later the same day, see the
+simulator entry below — and every mechanism the promise needs was in place.
+`Attestation.backing` was
 encoded into `attestations.jsonl`, exported in the bundle, and printed by
 `verifier/compass-verify.py`. Measured: replacing `backing: signer.backing` in
 `AchievementIssuer.seal` with a hardcoded `.secureEnclave` left **all 493 tests
@@ -120,6 +122,38 @@ is that fixture, it asserts that the two candidate roots differ before it assert
 which one was reached, and with the fix reverted on either side it is the only
 one of 483 tests that fails.
 
+### The verifier asserted the one claim it could not check
+
+Fixed 2026-08-01, in `verifier/compass-verify.py`. The shape: **the strongest
+claim on the page rendered with the marker reserved for what was recomputed.**
+
+`backing` is outside the digest — `docs/achievement-protocol.md` §6.1 freezes the
+canonical form and does not list it, because no signature can prove what hardware
+held a key. Three readings were possible and two hedged correctly: `software`
+printed unmarked and attributed to the record, a missing field printed `unknown`.
+`secureEnclave` printed `ok`, the same marker as the P-256 signature, the
+manifest digests and the chain.
+
+**Demonstrated.** Take a genuinely software-signed bundle, change one word in
+`attestations.jsonl`, recompute every `manifest.json` digest as an honest
+exporter would:
+
+```
+  ok         the key is Secure Enclave-backed, per the record
+  ok       every signature here came from a Secure Enclave key
+  Every check that could run, passed.                          exit 0
+```
+
+Nothing else notices, and nothing else should: the signature is genuine and the
+log is untouched. The only thing standing between a forged provenance claim and a
+clean run was how one line was printed — and it was printed as established.
+
+The rule this leaves: **`ok` belongs to a check that recomputed something.** A
+field that was read is reported as read, and the reading an attacker would choose
+gets no more confidence than the one that says nothing. It is the mirror of the
+entry above it: that one trusted tidy data, this one trusted undigested data, and
+both were readable as passes.
+
 ---
 
 ## Known-untested, and running
@@ -127,7 +161,57 @@ one of 483 tests that fails.
 `.claude/skills/testing.md` refuses SwiftUI snapshot tests and a broad XCUITest
 suite, out loud and for good reasons. That is a deliberate decision, not an
 oversight — but it leaves a region of live code with nothing behind it, and the
-two bugs above came out of exactly that region. So the region gets named.
+two `SettingsView` bugs above came out of exactly that region. So the region gets
+named.
+
+The first entry below is not untested code. It is a **limitation of the format**,
+filed here because it is the section a future session reads before believing
+something.
+
+### `backing` cannot distinguish a simulator from a phone, and nothing else can
+
+**A limitation of the format, recorded rather than fixed.** Measured 2026-08-01.
+`docs/achievement-protocol.md` §7.0 bis is the full reasoning; this is the
+operational version.
+
+§7 says "a simulator-made proof must never look as strong as a phone-made one",
+and five places in the repository explained how that was delivered: on the
+simulator there is no enclave, so the key falls back to software and the record
+says `software`.
+
+**That premise is false on every Mac this project has run on.** This host is an
+Intel Core i9 with an Apple T2 Security Chip. `SecureEnclave.isAvailable` is
+`true` inside the iOS Simulator there, so the first launch mints an enclave key
+in the *host Mac's* enclave, and the bundle exported from the simulator on
+2026-08-01 — `.../Devices/4D361587…/…/Compass-2026-08-01 2/attestations.jsonl` —
+carries `"backing":"secureEnclave"`. Apple Silicon behaves the same way. The
+fallback happens only on a host with **no** enclave, which excludes every T2 and
+Apple Silicon Mac. The enclave test even carried a `withKnownIssue` for hosts
+*without* one, so the inverse case had been considered and the live one had not.
+
+**So the guarantee §7's sentence describes has never been delivered, on any
+machine, since the first build.** What survives is the writer obligation —
+`backing` is the signer's own value, and `AchievementIssuerTests` fails when it
+lies — and the reader obligation not to default a missing value upward.
+
+**No mechanism was invented to close it, deliberately.** A device-class field
+would be a format change needing an ADR, it would be self-asserted, and it would
+sit outside the digest like `backing` does, so it would be attacker-controlled on
+any received bundle. It would buy a stronger-looking record and no stronger
+claim.
+
+What this costs, concretely:
+
+- Reading `secureEnclave` in a bundle tells you the key was enclave-backed. It
+  does **not** tell you the enclave was a phone's.
+- `docs/adr/0003`'s requirement to verify enclave-backed keys on physical
+  hardware before registering an on-chain owner is now load-bearing rather than
+  belt-and-braces: a simulator key looks identical to a phone key, so nothing
+  downstream can catch the mistake.
+- Anything that ever wants "this came from the phone" needs a mechanism that does
+  not exist yet — App Attest or DeviceCheck are the candidates, both are network
+  services, and neither is scheduled. Not a defect awaiting a fix; a gap awaiting
+  a requirement.
 
 ### The line that decides whether the store notice is ever spoken
 

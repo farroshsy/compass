@@ -140,8 +140,52 @@ struct CertificateModelTests {
         let failure = try #require(model.awardFailure)
         // The reason travels: there is nobody to file a report with, and a
         // recorded failure with no cause in it costs a future session the
-        // diagnosis.
-        #expect(failure.contains("Failure"))
+        // diagnosis. What travels is the error's *identity* — for an error this
+        // project defines, the bridged domain is its qualified type name.
+        #expect(failure.reason.contains("Failure"))
+    }
+
+    /// **No raw error text reaches the UI**, and the error that proves it is the
+    /// one a real failure produces.
+    ///
+    /// `awardFailure` was `"\(error)"` until 2026-08-01. Driven on the simulator
+    /// with an unreadable `awards.jsonl`, the Records footer rendered the whole
+    /// `NSCocoaErrorDomain Code=257` sentence — the host's absolute path, the
+    /// CoreSimulator device UUID and the App Group UUID — and it overflowed off
+    /// the bottom of the sheet.
+    ///
+    /// `CanonicalEncodingError` is deliberately payload-minimal, and its comment
+    /// says why: an error message is somewhere user data can travel. That
+    /// discipline binds only the errors this project writes, and **every
+    /// Foundation error that can reach this catch carries a path** — which is why
+    /// the fixture here is a real `NSError` with a real `NSFilePathErrorKey` and
+    /// not `FakeAwarding.Failure`, whose emptiness would let the old line pass.
+    @Test("A failure never carries the error's own text into the UI")
+    func aFailureNeverCarriesTheErrorsOwnText() async throws {
+        let unreadable = cocoaReadFailure()
+        // **The fixture is load-bearing.** If this ever stops holding, the error
+        // has stopped carrying what this test exists to keep off screen, and
+        // every assertion below would pass on the unfixed line too.
+        #expect("\(unreadable)".contains(unreadableAwardsPath))
+
+        let model = model(awarding: FakeAwarding(failingWith: unreadable))
+        await model.reconcile()
+
+        let failure = try #require(model.awardFailure)
+        let onScreen = SettingsCopy.awardFailed(reason: failure.reason)
+
+        // Nothing from the filesystem, and nothing from the message.
+        #expect(!onScreen.contains(unreadableAwardsPath))
+        #expect(!onScreen.contains("/Users/"))
+        #expect(!onScreen.contains("4D361587"))
+        #expect(!onScreen.contains("64541B32"))
+        #expect(!onScreen.contains("permission to view"))
+        #expect(!onScreen.contains("UserInfo"))
+
+        // What does survive is the diagnosis, and it is bounded — this footer
+        // sits under a list in a sheet, and the raw version ran off the bottom.
+        #expect(failure.reason == "NSCocoaErrorDomain 257")
+        #expect(failure.reason.count < 64)
     }
 
     /// The tap path carried the identical line and therefore the identical bug.

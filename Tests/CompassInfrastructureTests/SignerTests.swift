@@ -109,10 +109,14 @@ struct SignerTests {
 
     // MARK: §7 — backing is recorded honestly
 
-    /// "A simulator-made proof must never look as strong as a phone-made one."
+    /// "`backing` MUST be recorded honestly", `docs/achievement-protocol.md` §7.
     /// The software path is forced here rather than asserted about the host, so
     /// the test says the same thing on a machine with an enclave and on one
     /// without.
+    ///
+    /// Forcing it is also the only way to reach this branch on any machine this
+    /// project has run on: every T2 and Apple Silicon Mac has an enclave, and the
+    /// iOS Simulator on one uses it. §7.0 bis.
     @Test("A software key says it is a software key, and still round-trips")
     func softwareBackingIsRecordedHonestly() throws {
         try withTemporaryKeychain { store in

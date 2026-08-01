@@ -953,10 +953,40 @@ of a multi-user product to a single-user app.
 
 The only key in v1 is the **Secure Enclave P-256 signing key**, created on first
 launch, non-extractable, used to sign achievement digests. It is never shown,
-never named, never exported, and the user is never told it exists. On the
-simulator there is no enclave and the key falls back to software; the record
-says so, rather than letting a simulator-made proof look as strong as a
-phone-made one.
+never named, never exported, and the user is never told it exists. Where there is
+no enclave the key falls back to software, and `Attestation.backing` records
+which of the two actually signed.
+
+### The simulator is not the software case, and never was on this machine
+
+Corrected 2026-08-01, having been stated the other way in five places since the
+first build. The sentence used to read "on the simulator there is no enclave and
+the key falls back to software", and it is false on every Mac this project has
+run on.
+
+**Measured.** The host is an Intel Core i9 with an **Apple T2 Security Chip**.
+`SecureEnclave.isAvailable` is `true` inside the iOS Simulator there, so the
+first launch mints an enclave key and persists it, and the bundle exported from
+the simulator on 2026-08-01 carries:
+
+```json
+{"backing":"secureEnclave", ... ,"state":"sealed"}
+```
+
+The same holds on Apple Silicon. The fallback the sentence described happens only
+on a host with **no** Secure Enclave at all, which is a pre-2018 Intel Mac — the
+rare case, not the ordinary one. The enclave test even carried a
+`withKnownIssue` for hosts without an enclave, so the inverse case had been
+considered and the live one had not.
+
+**What follows for `docs/achievement-protocol.md` §7's rule** — "a simulator-made
+proof must never look as strong as a phone-made one" — is set out in that
+document's §7.0 bis, and the short form is that the rule binds the *writer* and
+cannot bind the *reader*: `backing` is honest about what backed the key and says
+nothing about what kind of machine ran the app, because a simulator key on a T2
+or Apple Silicon Mac **is** an enclave key, held in the host's enclave. No
+mechanism was invented to close that; the gap is recorded in
+`memory/known-bugs.md`.
 
 ### "The record says so" is two obligations, and only one of them was met
 
@@ -967,18 +997,17 @@ missing is what made all of that worthless:
 
 - **Nothing required it to be true.** Replacing `backing: signer.backing` in
   `AchievementIssuer.seal` with a hardcoded `.secureEnclave` left the entire
-  suite — 493 tests — passing. Every simulator-made bundle would have claimed the
-  strongest provenance the format can express and no test anywhere would have
-  noticed. `AchievementIssuerTests` now drives a software-backed keychain through
-  the whole issuer and asserts what lands on disk.
+  suite — 493 tests — passing. Every bundle would have claimed the strongest
+  provenance the format can express and no test anywhere would have noticed.
+  `AchievementIssuerTests` now drives a software-backed keychain through the
+  whole issuer and asserts what lands on disk.
 - **The run's conclusion did not carry it.** The verifier printed the backing
   per record, inside the branch that runs only when the signature verifies, and
   then ended with "Every check that could run, passed." A bundle every one of
   whose signatures came from a software key was indistinguishable, at the line a
   reader actually stops on, from one made on a phone. It now says which it saw
-  per record — verified or not — and again for the bundle as a whole, and a
-  record that does not say is reported as not saying rather than assumed to be
-  the stronger case.
+  per record and again for the bundle as a whole, and a record that does not say
+  is reported as not saying rather than assumed to be the stronger case.
 
 **It is carried alongside the digest and is not in it.** `docs/achievement-protocol.md`
 §6.1 freezes the canonical form and `backing` is not among its fields; adding it
@@ -988,6 +1017,44 @@ separate mutable file for exactly this class of value. A verifier therefore read
 it as the issuer's own claim about its own key, not as something the signature
 covers — which is honest, because nothing about a signature can prove what
 hardware held the key.
+
+### The verifier must not assert what it cannot verify
+
+Fixed 2026-08-01, the same day and one layer up. The pass above got the *content*
+of the backing lines right and the **confidence** of one of them wrong.
+
+`backing` is outside the digest, so on a bundle received from someone else it is
+attacker-controlled text that no signature covers. Three readings are possible
+and the verifier hedged two of them correctly — `software` printed unmarked and
+attributed to the record, a missing field printed as `unknown`. The third,
+`secureEnclave`, printed with the same `ok` marker as the P-256 signature, the
+manifest digests and the chain:
+
+```text
+  ok         the key is Secure Enclave-backed, per the record
+  ok       every signature here came from a Secure Enclave key
+```
+
+**The strongest claim in the format, the one an attacker would write, was the one
+rendered as a check that passed.** Demonstrated by taking a genuinely
+software-signed bundle, changing one word in `attestations.jsonl`, and
+recomputing every manifest digest: both lines above appear, "Every check that
+could run, passed." appears, exit code 0. Nothing else in the bundle notices,
+because nothing else is meant to — the signature is genuine.
+
+That contradicted `docs/achievement-protocol.md` §9 Invariant 8, which requires
+undigested text shown at all to be visibly marked unverified, and
+`verifier/README.md`, which already said the verifier "reports what the record
+says and never treats it as verified".
+
+All three readings are now printed as readings. **`ok` is reserved for a check
+that recomputed something**: the manifest digests, the per-writer chain, the
+evidence root, the P-256 signature. The enclave claim is `unknown` and appears in
+the end-of-run list of what the run could not establish. It is not promoted to a
+*failure* — a bundle claiming an enclave key is not thereby a forgery, and this
+file cannot tell the two apart, which is exactly what it now says.
+`VerifierTests.aForgedEnclaveClaimIsNotReportedAsVerified` is the forgery, and it
+asserts no line mentioning Secure Enclave carries an `ok`.
 
 ### The key must survive relaunch, and the copied code does not do that
 
@@ -1215,10 +1282,10 @@ fake clock, all running in milliseconds:
     signature, and the digest the anchor commits to. Two independent
     implementations agreeing is the only form of evidence available for a byte
     format, since a single implementation can only ever agree with itself. Three
-    of its seven cases are **negative**: an edited event is caught, an edited
-    event with the manifest rewritten to match is still caught, and an inflated
-    claim is caught — by the chain and by the claim, which is where the guarantee
-    actually lives.
+    of its original seven cases are **negative**: an edited event is caught, an
+    edited event with the manifest rewritten to match is still caught, and an
+    inflated claim is caught — by the chain and by the claim, which is where the
+    guarantee actually lives. It is eleven cases as of 2026-08-01.
 
     **A fourth kind of case was added on 2026-08-01, and it is the one this list
     was missing: a fixture built so that two plausible readings of the
@@ -1233,6 +1300,17 @@ fake clock, all running in milliseconds:
     differ, and then asserts which one each implementation reached. Agreement
     that only holds on tidy data is not agreement, and only a fixture that can
     tell two orders apart can show the difference.
+
+    **A fifth kind was added later the same day, and it is about the report
+    rather than the arithmetic.** `aForgedEnclaveClaimIsNotReportedAsVerified`
+    takes a genuinely software-signed bundle, changes `backing` to
+    `secureEnclave`, and recomputes every manifest digest — a forgery no check in
+    this file can catch, because `backing` is outside the digest and everything
+    that *is* checked remains genuine. The assertion is therefore not "this
+    fails" but **"no line mentioning Secure Enclave carries an `ok`"**: the only
+    defence available against an unverifiable field is refusing to present it as
+    verified. `docs/achievement-protocol.md` §9 Invariant 8, and §8 above for
+    what it replaced.
 
 Deliberately not written, and say so out loud rather than feeling guilty:
 SwiftUI snapshot tests (break on every point release, catch nothing a daily user

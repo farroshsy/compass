@@ -10,6 +10,39 @@ import Synchronization
 
 let habitA = HabitID(rawValue: "habit-a")
 let habitB = HabitID(rawValue: "habit-b")
+
+/// The path an unreadable `awards.jsonl` reports, in the shape the simulator
+/// actually produces: a home directory, a CoreSimulator device UUID and an App
+/// Group UUID. Every one of them was on screen in the Records footer until
+/// 2026-08-01.
+let unreadableAwardsPath =
+    "/Users/someone/Library/Developer/CoreSimulator/Devices"
+    + "/4D361587-08AE-4292-81F8-3DCA61DD5226/data/Containers/Shared"
+    + "/AppGroup/64541B32-7B21-4256-844C-7E1EB82D2F45/Compass/awards.jsonl"
+
+/// The error a real failure produces — `NSCocoaErrorDomain` 257, the one
+/// `Data(contentsOf:)` throws on a file it may not read.
+///
+/// Built rather than provoked so it is the same on every machine, and built with
+/// its `userInfo` populated because **that is where the path lives**: interpolate
+/// this value and the whole of ``unreadableAwardsPath`` comes with it. A fixture
+/// without it would let `awardFailure = "\(error)"` pass.
+///
+/// A function rather than a global `let`, because `NSError` is a reference type
+/// and a shared mutable global is not what a fixture should be.
+func cocoaReadFailure(path: String = unreadableAwardsPath) -> NSError {
+    NSError(
+        domain: NSCocoaErrorDomain,
+        code: 257,
+        userInfo: [
+            NSFilePathErrorKey: path,
+            NSLocalizedDescriptionKey:
+                "The file “awards.jsonl” couldn’t be opened because you don’t "
+                + "have permission to view it.",
+        ]
+    )
+}
+
 let writerApp = DeviceID(rawValue: "11111111-1111-4111-8111-111111111111")
 
 /// Surabaya, UTC+7 — the single user's timezone. `docs/product.md`.
@@ -265,12 +298,26 @@ final class FakeAwarding: Awarding {
         var book: AwardBook
         var passes = 0
         var fails = false
+        var error: (any Error)?
     }
 
     private let state: Mutex<State>
 
     init(book: AwardBook = .empty, fails: Bool = false) {
         state = Mutex(State(book: book, fails: fails))
+    }
+
+    /// Fails with a **specific** error, rather than with the bare marker above.
+    ///
+    /// It exists because one property of `TodayModel.awardFailure` cannot be
+    /// tested with an error that carries nothing: whether what the failure says
+    /// on screen is the error's own text. `Failure()` has no message and no path,
+    /// so it would pass either way — the failure mode this whole helper is here
+    /// to avoid. `CertificateModelTests.aFailureNeverCarriesTheErrorsOwnText`
+    /// hands it a real `NSCocoaErrorDomain` read failure with a real path in it.
+    convenience init(failingWith error: any Error) {
+        self.init(fails: true)
+        state.withLock { $0.error = error }
     }
 
     var passes: Int { state.withLock { $0.passes } }
@@ -295,14 +342,14 @@ final class FakeAwarding: Awarding {
     func evaluate() async throws -> AwardBook {
         try state.withLock { state in
             state.passes += 1
-            guard !state.fails else { throw Failure() }
+            guard !state.fails else { throw state.error ?? Failure() }
             return state.book
         }
     }
 
     func recorded() async throws -> AwardBook {
         try state.withLock { state in
-            guard !state.fails else { throw Failure() }
+            guard !state.fails else { throw state.error ?? Failure() }
             return AwardBook(
                 achievements: state.book.achievements,
                 revoked: state.book.revoked,

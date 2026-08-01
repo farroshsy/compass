@@ -248,6 +248,29 @@ other things in the same change. All four are written up in
   milestone that failed to issue was indistinguishable from one that was never
   earned. It is now recorded and shown in the settings sheet — never on Today.
 
+**A second pass later the same day found three more, all in what the app and the
+verifier *claim*.** Also in `memory/known-bugs.md`:
+
+- **The verifier asserted the one claim it could not check.** `backing` sits
+  outside the digest, and the `secureEnclave` reading printed with the same `ok`
+  marker as the P-256 signature and the manifest digests — while the two weaker
+  readings hedged correctly. Flip one word on a genuine software-signed bundle,
+  recompute the manifest, and the run says "Every check that could run, passed."
+  `ok` is now reserved for a check that recomputed something.
+- **"On the simulator there is no enclave" is false**, and it was stated in five
+  places. `SecureEnclave.isAvailable` is `true` in the iOS Simulator on every T2
+  and Apple Silicon Mac, and the bundle exported from the simulator on this host
+  carries `"backing":"secureEnclave"`. So `docs/achievement-protocol.md` §7's
+  "a simulator-made proof must never look as strong as a phone-made one" has
+  never been delivered. Corrected in all five, and the gap is recorded rather
+  than papered over with a new mechanism — §7.0 bis.
+- **A raw Swift error was rendered into the UI.** `awardFailure = "\(error)"` put
+  an `NSCocoaErrorDomain Code=257` sentence into the Records footer, carrying the
+  host's absolute path, the CoreSimulator device UUID and the App Group UUID, and
+  overflowing off the bottom of the sheet. It is now an `AwardFailure` carrying
+  the error's domain and code and nothing else — a type, so the raw interpolation
+  no longer compiles.
+
 ## What the next session should do
 
 **Put the app on the phone and use it.** That is still the one unticked item of

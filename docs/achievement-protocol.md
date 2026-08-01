@@ -461,6 +461,12 @@ enum SignerBacking: String { case secureEnclave, software }
 `backing` MUST be recorded honestly. A simulator-made proof must never look as
 strong as a phone-made one.
 
+**That second sentence rests on a premise that is false on modern hardware, and
+§7.0 bis says what it can and cannot deliver.** The rule itself is left standing
+verbatim, because `PROJECT_CONSTITUTION.md` §6 puts the protocol outside what may
+be changed without an ADR and the human's agreement — and because the obligation
+it places on the writer is still exactly right.
+
 **And it MUST be read out loud by anything that reads the record.** "Recorded
 honestly" was written as an obligation on the writer and was met from the first
 build, while nothing required the value to be the signer's own and the standalone
@@ -470,6 +476,15 @@ enclave-signed one. Both were fixed on 2026-08-01 and the reasoning is in
 missing `backing` to `secureEnclave`.** A record that does not say has to be
 reported as not saying, because the strongest reading is the one an attacker
 would choose.
+
+**Read out loud is not read as verified**, and the same day found the verifier
+conflating them: it printed the `secureEnclave` reading under the marker it uses
+for the P-256 signature and the manifest digests, while hedging the two weaker
+readings correctly. Since `backing` is outside the digest, flipping the word on a
+received bundle and recomputing the manifest costs nothing and leaves every real
+check passing — so the strongest and most forgeable claim in the format was the
+one presented as established. Invariant 8 in §9 is the rule it broke, and no
+reading of this field may now be rendered as a check that passed.
 
 **It is deliberately outside the digest**, which §6.1 freezes and which does not
 list it. That is not an oversight to be corrected later: a signature cannot prove
@@ -503,6 +518,56 @@ misread.
   is anchoring and returns it with the anchor added, which is what §7.1's
   ordering already implies: `sealed` happens immediately and offline, and
   `submitted` happens to a record that is already signed.
+
+### 7.0 bis — what "a simulator-made proof must never look as strong" can mean
+
+Measured 2026-08-01 and reported rather than amended, for the same reason §7.0's
+two findings are: this document is the one place the achievement format may
+change, and `PROJECT_CONSTITUTION.md` §6 puts that outside the AI's authority.
+
+**The premise is false on every Mac this project has run on.** Five places in the
+repository stated that on the simulator there is no enclave and the key falls
+back to software. The host is an Intel Mac with an Apple T2 Security Chip;
+`SecureEnclave.isAvailable` is `true` inside the iOS Simulator there, the first
+launch mints an enclave key, and the bundle exported from the simulator carries
+`"backing":"secureEnclave"`. Apple Silicon behaves the same way. The fallback the
+sentence assumed happens only on a host with **no** Secure Enclave, which
+excludes every T2 and Apple Silicon Mac. `docs/technical.md` §8.
+
+So a simulator-made proof *does* look exactly as strong as a phone-made one, and
+had done since the first build.
+
+**What the rule can still mean, and does:**
+
+- **It binds the writer, and that obligation is met.** `backing` MUST be the
+  signer's own value and never a constant. That is now a test rather than a
+  sentence — `AchievementIssuerTests.theRecordedBackingIsTheSignersOwn` drives a
+  software keychain through the whole issuer and asserts what lands on disk,
+  after a hardcoded `.secureEnclave` was measured to leave 493 tests passing.
+- **It binds the reader to read it out loud, and never upward.** A record that
+  omits `backing` MUST NOT be defaulted to `secureEnclave`, and no reading of the
+  field may be presented as verified — Invariant 8, and
+  `verifier/compass-verify.py` prints all three readings as readings.
+- **A simulator-made record is honest when it says `secureEnclave`.** The
+  simulator's key is a real enclave key, held in the *host's* enclave. `backing`
+  answers "what backed this key", truthfully. It never answered "what kind of
+  machine ran the app", and reading it that way is the mistake.
+
+**What the rule cannot mean:** that a reader can distinguish a simulator from a
+phone. **`backing` alone cannot, and nothing else in this format can either.**
+Two further reasons that gap is not closable here rather than merely unclosed:
+
+- A signature cannot prove what hardware held the key that made it — the
+  paragraph below already says so, and it is why `backing` sits outside the
+  digest in the first place.
+- Because it sits outside the digest, on a bundle received from someone else the
+  field is attacker-controlled regardless of what it says.
+
+**No mechanism was invented to close it.** A device-class field would be a format
+change requiring an ADR, and it would be self-asserted text with the same two
+problems, so it would buy a stronger-*looking* record and no stronger claim. The
+gap is recorded in `memory/known-bugs.md` as a limitation of the format, not as a
+defect awaiting a fix.
 
 ### 7.1 bis — the weekly log-head anchor is not an achievement
 

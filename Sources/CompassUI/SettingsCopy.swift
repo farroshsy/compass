@@ -95,8 +95,16 @@ public enum SettingsCopy {
     /// the first is a bug.
     ///
     /// It claims nothing about cryptography, so it passes the same check every
-    /// other sentence here does. The reason travels verbatim because there is
-    /// nobody to file a report with.
+    /// other sentence here does — and ``TodayModel/AwardFailure`` is what makes
+    /// that checkable, because the varying part of the sentence is now bounded.
+    ///
+    /// **`reason` is an ``AwardFailure/reason``, never an error's own text.** It
+    /// travels because there is nobody to file a report with, and it is a domain
+    /// and a code because the alternative was measured: the raw interpolation put
+    /// an absolute path and two UUIDs into this footer. `SettingsTests` runs the
+    /// ``unearnedClaims`` rule over this sentence *with a reason present*, which
+    /// until 2026-08-01 it did not — it passed `reason: ""`, so the only part of
+    /// the string that varies was the one part never checked.
     public static func awardFailed(reason: String) -> String {
         """
         The last check for new records did not finish, so a milestone reached \

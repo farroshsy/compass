@@ -721,7 +721,37 @@ struct SettingsTests {
             // the Records footer when a pass has failed, so it is subject to the
             // same rule: it describes what did not happen, and claims nothing
             // about what the record proves.
-            SettingsCopy.awardFailed(reason: ""),
+            //
+            // **With a reason present.** This read `reason: ""` until later the
+            // same day, which checked the fixed half of the sentence and left the
+            // only part that varies — the part composed from an error at runtime
+            // — never checked at all. Every reason the app can produce is an
+            // `AwardFailure.reason`, so the three below are what that type emits.
+            //
+            // A Foundation read failure, the ordinary case:
+            SettingsCopy.awardFailed(reason: AwardFailure(cocoaReadFailure()).reason),
+            // An error this project defines, whose bridged domain is its own
+            // qualified type name:
+            SettingsCopy.awardFailed(
+                reason: AwardFailure(
+                    CanonicalEncodingError.controlCharacter(scalar: 0x07, field: "facts")
+                ).reason
+            ),
+            // **And the one that makes this list load-bearing.**
+            // `CanonicalEncodingError.field` is composed as `"\(field).\(key)"`
+            // over a map's own keys — `CanonicalBytes.map(_:field:)` — and that
+            // encoder is also how a bundle received *from someone else* is
+            // re-encoded to check its digest. So the field name in a real error
+            // can be text this app never chose, including the exact vocabulary
+            // `unearnedClaims` bans. That is the same hazard the type's own
+            // comment names: "an error message is somewhere they can travel".
+            SettingsCopy.awardFailed(
+                reason: AwardFailure(
+                    CanonicalEncodingError.controlCharacter(
+                        scalar: 0x07, field: "facts.content_hash"
+                    )
+                ).reason
+            ),
         ]
         for sentence in copy {
             for claim in SettingsCopy.unearnedClaims {

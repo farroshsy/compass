@@ -216,10 +216,20 @@ hold ETH, which is a UX constraint with a simpler solution.
   prerequisite that is easy to discover late, and it briefly makes a domain
   registrar a dependency. If there is no domain that will still be owned in five
   years, the passkey path should be **dropped rather than deferred**.
-- The simulator has no Secure Enclave and falls back to a software key.
-  Anything enclave-backed MUST be verified on physical hardware before being
-  registered as an on-chain owner, or a key that does not exist on the phone gets
-  registered as an owner.
+- ~~The simulator has no Secure Enclave and falls back to a software key.~~
+  **Measured false on 2026-08-01.** `SecureEnclave.isAvailable` is `true` inside
+  the iOS Simulator on any host that has an enclave — every T2 and Apple Silicon
+  Mac — so the simulator mints a real enclave key **in the host Mac's enclave**
+  and records `secureEnclave`. `docs/technical.md` §8,
+  `docs/achievement-protocol.md` §7.0 bis. Struck rather than deleted, because
+  what this bullet concluded is unchanged and now rests on the opposite fact.
+
+  So, unchanged and for a stronger reason: anything enclave-backed MUST be
+  verified on physical hardware before being registered as an on-chain owner. A
+  simulator-made key does not merely look weaker-than-real — it looks *identical*
+  to a phone key, and no field in the record distinguishes them. A key that does
+  not exist on the phone would be registered as an owner with every check
+  passing.
 - Consolidation is the base rate, not the exception: two of the four major
   embedded-wallet vendors were acquired within roughly a year, toward acquirers
   whose roadmaps have no room for a single-user habit tracker. Assume anything

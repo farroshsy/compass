@@ -304,7 +304,7 @@ public struct SettingsView: View {
             // the certificate. A milestone that failed to issue and said nothing
             // anywhere is indistinguishable from one that was never earned.
             if let failure = model.awardFailure {
-                Text(SettingsCopy.awardFailed(reason: failure))
+                Text(SettingsCopy.awardFailed(reason: failure.reason))
             } else {
                 Text(SettingsCopy.certificatesFooter)
             }

@@ -144,8 +144,12 @@ public struct AchievementIssuer: Sendable {
                 achievement: achievement.id,
                 publicKey: signer.publicKey,
                 signature: try signer.signature(over: try achievement.canonicalBytes),
-                // Recorded honestly. A simulator-made proof must never look as
-                // strong as a phone-made one.
+                // Recorded honestly, §7: the signer's own value, never a
+                // constant. A hardcoded `.secureEnclave` here once left 493
+                // tests passing, which is why
+                // `AchievementIssuerTests.theRecordedBackingIsTheSignersOwn`
+                // exists. What the value can and cannot tell a reader — not
+                // which kind of machine ran the app — is §7.0 bis.
                 backing: signer.backing,
                 state: .sealed
             )
