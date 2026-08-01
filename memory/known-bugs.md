@@ -40,6 +40,54 @@ in 23 suites passed". The fix was extracting `SettingsEdits`, and the rule is
 now in `.claude/skills/architecture.md`: **behaviour goes in a plain value
 beside the `View`; the `View` keeps the layout.**
 
+### The achievement pass failed silently, on both of its call sites
+
+Fixed 2026-08-01. `Sources/CompassUI/TodayModel.swift`, the tap path and
+`reconcile()`.
+
+Both read `if let issued = try? await awarding.evaluate()`. `try?` discards the
+error at the point it happens, so a pass that could not read the log, could not
+reach the keychain or could not canonicalise a record left **no trace of any
+kind** — no state, no file, no log line. A milestone that failed to issue looked
+exactly like one that was never earned, and only one of those is a bug.
+
+`.claude/skills/ui.md` forbidding a failure surface on Today is correct and was
+not the cause; the file makes the same distinction for anchoring — "invisible on
+the main screen does not mean unsayable anywhere". The two lines simply took the
+first half and skipped the second.
+
+The shape to recognise: **`try?` on a call whose failure has no other
+observer.** It is indistinguishable from `try?` on a call whose failure is
+genuinely uninteresting, and the two sit side by side in this file —
+`TodayModel.append` uses `try?` correctly, because a failed write changes nothing
+on screen *and the screen is the record of what happened*.
+
+### A hardcoded `backing` would have passed 493 tests
+
+Fixed 2026-08-01. The shape: **a value that is carried everywhere and required
+nowhere.**
+
+`Signer.swift`'s own doc comment promises that "on the simulator there is no
+enclave and the key falls back to software; `backing` records that honestly", and
+every mechanism that promise needs was in place — `Attestation.backing` was
+encoded into `attestations.jsonl`, exported in the bundle, and printed by
+`verifier/compass-verify.py`. Measured: replacing `backing: signer.backing` in
+`AchievementIssuer.seal` with a hardcoded `.secureEnclave` left **all 493 tests
+passing**. `SignerTests` pinned `Signer.backing` itself; nothing pinned whether
+what the signer knew survived onto disk.
+
+Two smaller defects came out of the same look:
+
+- the verifier printed the backing **inside** the branch that runs only when the
+  signature verifies, so a bundle whose signature failed said nothing about its
+  provenance — which is exactly the bundle a reader wants it from;
+- the run's conclusion — the line a reader actually stops on — was identical for
+  a software-signed bundle and an enclave-signed one.
+
+The rule this leaves: **a value whose whole purpose is honesty needs a test that
+fails when it lies.** Carrying it, encoding it and printing it are not that test,
+and all three can be present while the value is a constant.
+
 ### The verifier computed the evidence root over the wrong leaf order
 
 Fixed on 2026-08-01, in `verifier/compass-verify.py`. Recorded because the shape
@@ -107,6 +155,30 @@ call site; only a reader can.
 **Standing rule, since there is no test to enforce it:** anything added inside
 that accessibility element must also be added to `TodayModel.spokenCaption`, or
 it is written on the screen and unsayable.
+
+### The `fileExporter` presentation itself
+
+`Sources/CompassUI/SettingsView.swift`, the `.fileExporter` modifier and
+`startExport()`.
+
+**Nothing asserts that a folder ever lands on disk.** Every decision around it is
+tested — `TodayModel.export()` returns the port's bundle or a sentence
+(`ExportControlTests`), `BundleDocument.directoryWrapper()` reproduces the bundle
+byte for byte including its nesting, `SettingsCopy.exportFilename` is a civil
+date, and `ExportTests` pins that the port's bundle is the bundle
+`Exporter.export(to:at:)` writes. What is not tested is the four lines between
+them: the binding that presents the sheet, the `contentType: .folder`, the
+`defaultFilename`, and the `onCompletion` that clears the document.
+
+That is the same class as every other `View` line below and it has the same
+cause: `.claude/skills/testing.md` refuses snapshot tests and a broad XCUITest
+suite, so there is no mechanism here that can drive a system sheet.
+
+**Standing rule, since there is no test to enforce it:** `directoryWrapper()` is
+the only thing that decides bytes, and `fileWrapper(configuration:)` must stay
+one line of forwarding — `FileDocumentWriteConfiguration` has no accessible
+initialiser, so anything moved into it becomes untestable the moment it is
+written.
 
 ### Everything else inside a `View` body
 

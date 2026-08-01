@@ -260,7 +260,10 @@ public enum AppComposition {
                     // Week 4. It is constructed on every launch and makes no
                     // request until something is actually due, which is what
                     // lets `TodayModel` call it on every foreground.
-                    anchoring: AnchorPipeline(layout: layout, clock: clock)
+                    anchoring: AnchorPipeline(layout: layout, clock: clock),
+                    // The settings sheet's export control. Reads nothing and
+                    // costs nothing until the button is pressed.
+                    exporting: Exporter(layout: layout, clock: clock)
                 )
             }
 
@@ -288,7 +291,8 @@ public enum AppComposition {
                 // qualifying events' `content_hash` and a projection has no
                 // events in it. `docs/achievement-protocol.md` §4.1.
                 awarding: AchievementIssuer(layout: layout, recorder: journal, clock: clock),
-                anchoring: AnchorPipeline(layout: layout, clock: clock)
+                anchoring: AnchorPipeline(layout: layout, clock: clock),
+                exporting: Exporter(layout: layout, clock: clock)
             )
         } catch {
             // `docs/technical.md` §6: **never refuse to launch.** A

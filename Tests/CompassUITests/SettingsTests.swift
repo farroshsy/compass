@@ -717,6 +717,11 @@ struct SettingsTests {
             // have earned them.
             SettingsCopy.exportButton,
             SettingsCopy.exportFooter,
+            // The achievement-pass failure notice, added 2026-08-01. It replaces
+            // the Records footer when a pass has failed, so it is subject to the
+            // same rule: it describes what did not happen, and claims nothing
+            // about what the record proves.
+            SettingsCopy.awardFailed(reason: ""),
         ]
         for sentence in copy {
             for claim in SettingsCopy.unearnedClaims {

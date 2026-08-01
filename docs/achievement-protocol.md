@@ -461,6 +461,23 @@ enum SignerBacking: String { case secureEnclave, software }
 `backing` MUST be recorded honestly. A simulator-made proof must never look as
 strong as a phone-made one.
 
+**And it MUST be read out loud by anything that reads the record.** "Recorded
+honestly" was written as an obligation on the writer and was met from the first
+build, while nothing required the value to be the signer's own and the standalone
+verifier ended a software-signed bundle's run with the same conclusion as an
+enclave-signed one. Both were fixed on 2026-08-01 and the reasoning is in
+`docs/technical.md` §8; the rule this leaves is that a reader **may not default a
+missing `backing` to `secureEnclave`.** A record that does not say has to be
+reported as not saying, because the strongest reading is the one an attacker
+would choose.
+
+**It is deliberately outside the digest**, which §6.1 freezes and which does not
+list it. That is not an oversight to be corrected later: a signature cannot prove
+what hardware held the key that made it, so `backing` is the issuer's claim about
+itself and belongs in the mutable file beside the signature rather than inside
+the bytes the signature covers. Adding it to §6.1 would invalidate every digest
+ever computed, which is exactly what §6.8 exists to prevent.
+
 `ChainRecord`, if it ever exists, holds `chainId`, `contract`, `tokenId` and
 `txHash`. It is reserved here so that adding it later is not a format change.
 

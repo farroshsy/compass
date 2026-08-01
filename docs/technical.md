@@ -541,6 +541,21 @@ The cheap fallback if the synchronous journal proves annoying is to delete line
 because "did my tap actually save?" is precisely the doubt that erodes trust in
 a daily driver, and this removes it by construction rather than by hope.
 
+**Line 5 may fail, and until 2026-08-01 nothing anywhere knew when it did.** Both
+call sites — the tap path and `TodayModel.reconcile` after the replay — read
+`if let issued = try? await awarding.evaluate()`, which discards the error at the
+point it happens. `.claude/skills/ui.md` is right that Today must say nothing
+about the engine, and it still says nothing; but a milestone that silently failed
+to issue was indistinguishable from one that was never earned, and only one of
+those is a bug. The failure now lands in two places, neither of them Today:
+`AchievementIssuer.evaluate()` writes it to stderr before rethrowing, where a
+device console or a test run keeps it for a future session, and
+`TodayModel.awardFailure` holds it for the settings sheet, which replaces the
+Records footer with it until a pass succeeds. It is **not persisted**, and the
+argument is the engine's own idempotence: a failure whose cause is gone does not
+recur, and one whose cause is still there fails again on the next tap and says so
+again.
+
 ### Launch path
 
 The first frame must render correct data with **zero awaits**. Do not
@@ -943,6 +958,37 @@ simulator there is no enclave and the key falls back to software; the record
 says so, rather than letting a simulator-made proof look as strong as a
 phone-made one.
 
+### "The record says so" is two obligations, and only one of them was met
+
+Fixed 2026-08-01. `Attestation.backing` was carried, encoded into
+`attestations.jsonl`, exported in the bundle and printed by
+`verifier/compass-verify.py` from the day each of those was written. What was
+missing is what made all of that worthless:
+
+- **Nothing required it to be true.** Replacing `backing: signer.backing` in
+  `AchievementIssuer.seal` with a hardcoded `.secureEnclave` left the entire
+  suite — 493 tests — passing. Every simulator-made bundle would have claimed the
+  strongest provenance the format can express and no test anywhere would have
+  noticed. `AchievementIssuerTests` now drives a software-backed keychain through
+  the whole issuer and asserts what lands on disk.
+- **The run's conclusion did not carry it.** The verifier printed the backing
+  per record, inside the branch that runs only when the signature verifies, and
+  then ended with "Every check that could run, passed." A bundle every one of
+  whose signatures came from a software key was indistinguishable, at the line a
+  reader actually stops on, from one made on a phone. It now says which it saw
+  per record — verified or not — and again for the bundle as a whole, and a
+  record that does not say is reported as not saying rather than assumed to be
+  the stronger case.
+
+**It is carried alongside the digest and is not in it.** `docs/achievement-protocol.md`
+§6.1 freezes the canonical form and `backing` is not among its fields; adding it
+would change every digest ever computed, and §6.8's version policy exists
+precisely so that this is not done. It lives in `Attestation`, which §7 makes a
+separate mutable file for exactly this class of value. A verifier therefore reads
+it as the issuer's own claim about its own key, not as something the signature
+covers — which is honest, because nothing about a signature can prove what
+hardware held the key.
+
 ### The key must survive relaunch, and the copied code does not do that
 
 "Created on first launch" is a promise the inherited `Signer` cannot keep. Its
@@ -996,6 +1042,22 @@ manifest.json             per-file SHA-256 digests, plus the export timestamp
 wrote one. The four copies of this list — here, `docs/product.md`,
 `docs/adr/0002` and `memory/next-tasks.md` — are updated together, which is the
 whole reason it is stated four times in identical words.
+
+**And it has a surface, from 2026-08-01.** `Exporter` was written and tested in
+week 1 and reachable from nothing: no call site outside its own test file, so
+every bundle this project had ever verified — including the one the standalone
+verifier was first run against — was produced by a helper process written beside
+the app. A user could not hand anyone anything, which makes `docs/product.md`'s
+mission sentence unreachable rather than merely unimplemented.
+
+The surface is an export section at the bottom of the settings sheet, which is
+where `docs/product.md` budgeted it ("Rename, archive, export"). It goes through
+the `Exporting` port and SwiftUI's **`fileExporter`**, and deliberately not
+`ShareLink`: `.claude/skills/ui.md` allows exactly one `ShareLink` in the whole
+app and `docs/product.md` builds the certificate's justification on being the one
+thing you hand to someone. `Exporter.bundle(at:)` returns the bundle in memory
+and `export(to:at:)` writes what it returns, so there is one definition of what a
+bundle contains and a test asserts the two forms agree file for file.
 
 **A test asserts that a fresh install fed only the exported bundle reproduces
 every achievement bit-identically and verifies every proof.** An unexercised

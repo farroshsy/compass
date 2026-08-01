@@ -97,12 +97,21 @@ struct CertificateModelTests {
         #expect(model.certificates.count == 2)
     }
 
-    /// Nothing on the launch path waits for the engine, and a failed pass says
-    /// nothing anywhere: it is idempotent and re-runnable, so the next launch
-    /// finds whatever this one missed. There is no achievement-failure surface
-    /// in this product and there must not be one.
-    @Test("A failing engine leaves the screen usable and says nothing")
-    func aFailedPassIsSilent() async throws {
+    /// Nothing on the launch path waits for the engine, and a failed pass raises
+    /// nothing: no card, no alert, nothing on Today.
+    ///
+    /// **This comment used to end "there is no achievement-failure surface in
+    /// this product and there must not be one", and the second half was wrong.**
+    /// `.claude/skills/ui.md` bans it *on Today*, which is right — the engine is
+    /// invisible and a status area on that screen would break the one thing the
+    /// product is. It does not ban saying so anywhere, and it draws exactly that
+    /// distinction for anchoring: "invisible on the main screen does not mean
+    /// unsayable anywhere". A milestone that failed to issue and left no trace is
+    /// indistinguishable from one that was never earned, and the second is a fact
+    /// about the user's life while the first is a bug.
+    /// See ``CompassUI/TodayModel/awardFailure``.
+    @Test("A failing engine leaves the screen usable and raises nothing")
+    func aFailedPassRaisesNothing() async throws {
         let engine = FakeAwarding(fails: true)
         let model = model(awarding: engine)
 
@@ -110,8 +119,101 @@ struct CertificateModelTests {
 
         #expect(model.presented == nil)
         #expect(model.certificates.isEmpty)
-        // The screen still works.
+        // The screen still works, and nothing it renders moved.
         #expect(model.habits.count == 4)
+        #expect(model.caption == TodayCaption.text(totalDays: 0, firstDay: nil))
+    }
+
+    // MARK: A failed pass is remembered — not on Today, and not nowhere
+
+    /// **The bug this replaced.** Both call sites read
+    /// `if let issued = try? await awarding.evaluate()`, so every failure was
+    /// discarded at the point it happened — no state, no file, no log line. A
+    /// milestone that could not be issued was, from every angle available to a
+    /// person or to a future session, a milestone that was never earned.
+    @Test("A failed pass is remembered, with the reason")
+    func aFailedPassIsRemembered() async throws {
+        let model = model(awarding: FakeAwarding(fails: true))
+
+        await model.reconcile()
+
+        let failure = try #require(model.awardFailure)
+        // The reason travels: there is nobody to file a report with, and a
+        // recorded failure with no cause in it costs a future session the
+        // diagnosis.
+        #expect(failure.contains("Failure"))
+    }
+
+    /// The tap path carried the identical line and therefore the identical bug.
+    /// It is asserted separately because they are two call sites, and because §4
+    /// line 5 dispatches rather than awaits — a fix applied to the launch path
+    /// alone would leave the more frequent one silent.
+    @Test("A pass that fails on the tap path is remembered too")
+    func aFailedTapPassIsRemembered() async throws {
+        let engine = FakeAwarding(fails: true)
+        let model = model(awarding: engine)
+
+        model.toggle(model.habits[0])
+        // Wait for the pass to have *run*, then give its continuation a bounded
+        // number of turns to land. Spinning on `awardFailure` itself would be
+        // spinning on the thing under test: the first version of this test did
+        // exactly that and hung the whole suite when the fix was mutated out,
+        // which is a worse failure than a red assertion.
+        while engine.passes == 0 { await Task.yield() }
+        for _ in 0..<100 where model.awardFailure == nil { await Task.yield() }
+
+        #expect(model.awardFailure != nil)
+        #expect(model.presented == nil)
+    }
+
+    /// **Cleared by the next pass that works**, which is what keeps it honest
+    /// rather than alarming — and what makes not persisting it defensible. The
+    /// engine is idempotent and re-runnable, so a transient failure resolves
+    /// itself on the next tap or launch, and one whose cause is still there fails
+    /// again and says so again.
+    @Test("A later successful pass clears the failure")
+    func aSuccessfulPassClearsIt() async throws {
+        let issued = award()
+        let engine = FakeAwarding(fails: true)
+        let model = model(awarding: engine)
+
+        await model.reconcile()
+        #expect(model.awardFailure != nil)
+
+        engine.succeed(with: book([issued], newlyIssued: [issued.id]))
+        await model.reconcile()
+
+        #expect(model.awardFailure == nil)
+        #expect(model.certificates.map(\.id) == [issued.id])
+    }
+
+    /// Nothing failed, so nothing is said. A sheet carrying a standing sentence
+    /// about the engine would be a status area with extra steps.
+    @Test("A pass that works says nothing about failing")
+    func aWorkingPassSaysNothing() async throws {
+        let model = model(awarding: FakeAwarding(book: book([award()])))
+        await model.reconcile()
+        #expect(model.awardFailure == nil)
+    }
+
+    /// A model with no engine has nothing to report either. The unopenable-store
+    /// launch already says what it has to say through
+    /// ``CompassUI/TodayModel/isStoreAvailable``, and a second sentence about a
+    /// pass that was never attempted would be noise.
+    @Test("No engine is not a failed pass")
+    func noEngineIsNotAFailure() async throws {
+        let events = seededFour()
+        let model = TodayModel(
+            events: events,
+            clock: ScriptedClock("2026-03-14T09:00:00+07:00"),
+            recorder: FakeRecorder(continuing: events),
+            source: FakeSource(events: events)
+        )
+
+        await model.reconcile()
+        model.toggle(model.habits[0])
+
+        #expect(model.awardFailure == nil)
     }
 
     /// A model with no engine at all — the unopenable-store launch — behaves

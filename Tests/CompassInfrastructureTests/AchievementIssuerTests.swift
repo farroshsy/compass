@@ -92,6 +92,72 @@ struct AchievementIssuerTests {
         }
     }
 
+    /// **`backing` on the record is the signer's own, not a constant.**
+    /// `docs/technical.md` §8, `docs/achievement-protocol.md` §7.
+    ///
+    /// > On the simulator there is no enclave and the key falls back to software;
+    /// > the record says so, rather than letting a simulator-made proof look as
+    /// > strong as a phone-made one.
+    ///
+    /// Nothing asserted that until 2026-08-01, and the cost was measured:
+    /// replacing `backing: signer.backing` in `AchievementIssuer.seal` with a
+    /// hardcoded `.secureEnclave` left **all 493 tests passing**. The value was
+    /// reaching `attestations.jsonl` and the standalone verifier the whole time,
+    /// and every simulator-made bundle would have claimed the strongest
+    /// provenance the format can express.
+    ///
+    /// It is driven through the whole issuer rather than through `Signer` alone —
+    /// `SignerTests` already pins `Signer.backing` itself — because the defect is
+    /// not in the signer. It is in whether what the signer knows survives the
+    /// trip onto disk.
+    ///
+    /// The software key is made the way a simulator makes one, through
+    /// `Signer(store:preferEnclave:)`, and the issuer then *restores* it. That
+    /// is the real path: a build that has ever run without an enclave keeps the
+    /// software key in its keychain forever.
+    @Test("A software-backed key is recorded as software, on disk, by the issuer")
+    func theRecordedBackingIsTheSignersOwn() throws {
+        try seededStore(days: 10) { layout, _, issuer, keys in
+            // The key exists before the pass, exactly as it does on every launch
+            // after the first, and it is a software one.
+            let minted = try Signer(store: keys, preferEnclave: false)
+            #expect(minted.backing == .software)
+
+            let book = try issuer.issue()
+            let award = try #require(book.achievements.first)
+
+            #expect(book.attestations[award.id]?.backing == .software)
+            #expect(book.attestations[award.id]?.publicKey == minted.publicKey)
+
+            // And it is on disk, in the file that travels, rather than only in
+            // the value this pass returned.
+            let onDisk = try AwardStore(layout: layout).readAttestations()
+            #expect(onDisk[award.id]?.backing == .software)
+            let raw = try String(contentsOf: layout.attestations, encoding: .utf8)
+            #expect(raw.contains("\"backing\":\"software\""))
+            #expect(!raw.contains("secureEnclave"))
+        }
+    }
+
+    /// The other half, so the test above cannot pass by always reading
+    /// `software`. On a machine with an enclave the ordinary path records
+    /// `secureEnclave`, and on one without it there is nothing to distinguish —
+    /// so the assertion is that the record agrees with the signer, whichever the
+    /// machine has.
+    @Test("The recorded backing always agrees with the key that actually signed")
+    func theRecordAgreesWithTheSigner() throws {
+        try seededStore(days: 10) { _, _, issuer, keys in
+            let book = try issuer.issue()
+            let award = try #require(book.achievements.first)
+            // Constructed after the pass, so it restores the key the pass
+            // persisted rather than minting a second one.
+            let signer = try Signer(store: keys)
+
+            #expect(book.attestations[award.id]?.backing == signer.backing)
+            #expect(book.attestations[award.id]?.publicKey == signer.publicKey)
+        }
+    }
+
     /// §9.2 and §9.5. The certificate must not be raised twice for one fact, and
     /// `awards.jsonl` must not grow a duplicate line per launch.
     @Test("Running the pass again awards nothing and writes nothing")

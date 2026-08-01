@@ -54,6 +54,30 @@ public final class TodayModel {
     /// certificate list reads it; the certificate itself is built from one entry.
     public private(set) var book: AwardBook = .empty
 
+    /// Why the last achievement pass failed, or `nil` when the last one
+    /// succeeded — the raw reason, not a sentence. ``SettingsCopy`` composes what
+    /// is rendered.
+    ///
+    /// **A milestone that silently fails to issue is indistinguishable from one
+    /// that was never earned**, and until 2026-08-01 both call sites did
+    /// `try? await awarding.evaluate()` and discarded every failure. Nothing
+    /// anywhere — not the screen, not a file, not a log line — recorded that a
+    /// pass had run and not worked.
+    ///
+    /// `.claude/skills/ui.md` is right that **Today must say nothing about it**,
+    /// and Today still says nothing: the engine is invisible, and a screen that
+    /// reported on a background pass would be a screen with a status area. The
+    /// settings sheet is where it goes, because the surface budget allows it and
+    /// because the sheet is already where the record is discussed.
+    ///
+    /// **It is cleared by the next pass that works**, which is what makes it
+    /// honest rather than alarming: the engine is idempotent and re-runnable, so
+    /// a transient failure disappears on the next tap or the next launch, and one
+    /// that keeps happening keeps saying so. That is also the argument for not
+    /// persisting it — a failure that did not survive the process is one whose
+    /// cause either recurred, and is on screen again, or did not.
+    public private(set) var awardFailure: String?
+
     /// The certificate to put on screen, or `nil`.
     ///
     /// **Set by the engine on the pass that finds something, and by the
@@ -357,14 +381,39 @@ public final class TodayModel {
     /// whole product is. `Awarding` reads the log itself — see the port for why it
     /// cannot take the projection — so this dispatches and returns.
     ///
-    /// A failed pass is silent. There is no achievement-failure surface anywhere,
-    /// by design: the engine is idempotent and re-runnable, so the next launch
-    /// finds whatever this one missed.
+    /// **A failed pass says nothing on Today and is not thrown away.**
+    /// `.claude/skills/ui.md` forbids this screen from carrying any of it, which
+    /// is correct — the engine is invisible and a status area here would be a
+    /// second thing to read on a screen whose whole promise is three seconds. But
+    /// "invisible on Today" is not "unsayable anywhere", exactly as anchoring
+    /// failure is invisible on Today and sayable on the certificate.
+    ///
+    /// So it lands in ``awardFailure``, which the settings sheet renders, and in
+    /// stderr, which `AchievementIssuer.evaluate()` writes before rethrowing.
+    /// Until 2026-08-01 this line read `guard let issued = try? await ...` and a
+    /// milestone that failed to issue left no trace of any kind.
     private func award() {
-        guard let awarding else { return }
+        guard awarding != nil else { return }
         Task { @MainActor in
-            guard let issued = try? await awarding.evaluate() else { return }
+            await runAwardPass()
+        }
+    }
+
+    /// One pass, with its outcome recorded either way.
+    ///
+    /// Shared by the tap path and by ``reconcile()`` because they had the same
+    /// bug in the same words, and two copies of "remember what went wrong" is two
+    /// places for one of them to stop remembering.
+    private func runAwardPass() async {
+        guard let awarding else { return }
+        do {
+            let issued = try await awarding.evaluate()
+            // Cleared only on success, and cleared *before* adopting, so nothing
+            // can observe a fresh book beside a stale complaint about it.
+            awardFailure = nil
             adopt(issued)
+        } catch {
+            awardFailure = "\(error)"
         }
     }
 
@@ -635,9 +684,13 @@ public final class TodayModel {
         // It is awaited here — unlike on the tap path — because `reconcile` is
         // already the `.task` that follows the first frame and is allowed to take
         // time. Nothing is on screen waiting for it.
-        if let awarding, let issued = try? await awarding.evaluate() {
-            adopt(issued)
-        }
+        //
+        // Same call as the tap path, so a failure on either is remembered the
+        // same way. This line used to be `if let awarding, let issued = try?
+        // await awarding.evaluate()`, which discarded every failure on the one
+        // pass that runs over the *whole* log and therefore the one most likely
+        // to hit a damaged file.
+        await runAwardPass()
 
         await drainAnchors()
     }

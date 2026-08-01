@@ -84,6 +84,27 @@ public enum SettingsCopy {
     /// A revoked row's title and tag, at 45% ink. No colour, no icon.
     public static let revokedInk: Double = 0.45
 
+    /// **The achievement pass failed, said where records are discussed and
+    /// nowhere else.**
+    ///
+    /// `.claude/skills/ui.md` keeps Today silent about the engine and that is
+    /// right; it also says, of the anchoring case, that "invisible on the main
+    /// screen does not mean unsayable anywhere". This is the same shape. Without
+    /// it, a milestone that failed to issue is indistinguishable from one that
+    /// was never earned — and the second is a fact about the user's life while
+    /// the first is a bug.
+    ///
+    /// It claims nothing about cryptography, so it passes the same check every
+    /// other sentence here does. The reason travels verbatim because there is
+    /// nobody to file a report with.
+    public static func awardFailed(reason: String) -> String {
+        """
+        The last check for new records did not finish, so a milestone reached \
+        since then may not be listed yet. It runs again on the next tap and on \
+        the next launch. \(reason)
+        """
+    }
+
     // MARK: Export
 
     /// The control `docs/product.md` budgets for this sheet — "Rename, archive,
